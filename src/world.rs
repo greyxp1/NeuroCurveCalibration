@@ -8,7 +8,7 @@ pub fn setup_world(
 ) {
     // Ground Plane
     commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 50.0, subdivisions: 1 })), // Explicit subdivisions
+        mesh: meshes.add(Mesh::from(bevy::math::primitives::Plane3d::default().mesh().size(50.0, 50.0))), // Using Plane3d
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(0.2, 0.2, 0.25), // Slightly bluish grey
             perceptual_roughness: 0.8, // Less reflective

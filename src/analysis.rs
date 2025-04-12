@@ -87,7 +87,7 @@ pub fn update_advanced_metrics(
         mouse_speed,
         target_hit: target_hit_this_frame,
         target_position: hit_position,
-        camera_direction: camera_transform.forward(),
+        camera_direction: *camera_transform.forward(),
     };
 
     metrics.aim_samples.push_back(sample);

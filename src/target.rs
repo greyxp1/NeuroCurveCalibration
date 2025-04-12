@@ -1,4 +1,4 @@
-use bevy::{prelude::*, pbr::NotShadowCaster, math::Ray};
+use bevy::{prelude::*, pbr::NotShadowCaster};
 use std::time::Duration;
 use rand::prelude::*;
 
@@ -59,12 +59,12 @@ pub enum Hitbox {
 
 impl Hitbox {
     // Ray intersection check
-    pub fn intersect_ray(&self, ray: Ray, transform: &GlobalTransform) -> Option<f32> {
+    pub fn intersect_ray(&self, ray: bevy::math::Ray3d, transform: &GlobalTransform) -> Option<f32> {
         match self {
             Hitbox::Sphere { radius } => {
                 // Ray-sphere intersection formula
                 let origin_to_center = transform.translation() - ray.origin;
-                let projection = origin_to_center.dot(ray.direction);
+                let projection = origin_to_center.dot(*ray.direction);
                 let distance_sq = origin_to_center.length_squared() - projection * projection;
                 let radius_sq = radius * radius;
 
@@ -198,7 +198,7 @@ pub fn update_target_spawners(
 
             let mut entity_commands = commands.spawn((
                 PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::UVSphere { radius: target_bundle.radius, sectors: 16, stacks: 16 })),
+                    mesh: meshes.add(Mesh::from(bevy::math::primitives::Sphere { radius: target_bundle.radius })),
                     material: materials.add(StandardMaterial { base_color: spawner.target_color, emissive: spawner.target_color * 0.1, ..default() }),
                     transform: Transform::from_translation(position),
                     ..default()
@@ -254,7 +254,7 @@ pub fn reset_score_tracker_flags(mut score_tracker: ResMut<ScoreTracker>) {
 pub fn update_score_tracker(
     mut score_tracker: ResMut<ScoreTracker>,
     mut target_destroyed_events: EventReader<TargetDestroyedEvent>,
-    mouse_button_input: Res<Input<MouseButton>>, // Keep checking mouse input here for misses
+    mouse_button_input: Res<ButtonInput<MouseButton>>, // Keep checking mouse input here for misses
 ) {
     // Process destroyed targets first
     for destroyed_event in target_destroyed_events.read() {
@@ -323,7 +323,7 @@ pub fn update_target_lifetime(
 // System to handle target hit detection (using raycasting from camera)
 pub fn detect_target_hits(
     mut commands: Commands,
-    mouse_button_input: Res<Input<MouseButton>>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
     camera_query: Query<(&Camera, &GlobalTransform)>, // Use Camera and GlobalTransform for raycasting
     target_query: Query<(Entity, &GlobalTransform, &Target, &Hitbox)>,
     mut target_hit_events: EventWriter<TargetHitEvent>,
@@ -419,7 +419,7 @@ pub fn provide_hit_feedback(
     for hit_event in target_hit_events.read() {
         commands.spawn((
             PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.1, ..default() })),
+                mesh: meshes.add(Mesh::from(bevy::math::primitives::Sphere { radius: 0.1 })),
                 material: materials.add(StandardMaterial { base_color: Color::YELLOW, emissive: Color::YELLOW * 5.0, ..default() }), // Brighter emissive
                 transform: Transform::from_translation(hit_event.hit_position),
                 ..default()

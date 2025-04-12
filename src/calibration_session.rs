@@ -1,8 +1,8 @@
 // src/calibration_session.rs
 use bevy::prelude::*;
 use std::collections::HashMap;
-use std::process::exit; // To exit the app when done
-use crate::{ScoreTracker, AdvancedMetrics, CurveParameters}; // Import necessary types
+use serde_json; // Add serde_json for serialization
+use crate::{ScoreTracker, AdvancedMetrics}; // Import necessary types
 
 // --- Resources ---
 
@@ -38,7 +38,7 @@ pub fn run_calibration_scenarios(
     time: Res<Time>,
     // Add queries/resources needed to run/monitor scenarios
     score: Res<ScoreTracker>,
-    adv_metrics: Res<AdvancedMetrics>,
+    _adv_metrics: Res<AdvancedMetrics>, // Prefix with underscore to indicate intentional non-use
     // Query for targets, player, etc.
 ) {
     if state.is_complete {
@@ -53,9 +53,10 @@ pub fn run_calibration_scenarios(
 
     if state.scenario_timer.finished() {
         // Scenario finished, collect data
-        println!("Scenario {} finished.", state.current_scenario + 1);
-        state.collected_metrics.insert(format!("scenario_{}_score", state.current_scenario), score.score as f64);
-        state.collected_metrics.insert(format!("scenario_{}_accuracy", state.current_scenario), score.accuracy as f64);
+        let current_scenario = state.current_scenario; // Store locally to avoid borrow issues
+        println!("Scenario {} finished.", current_scenario + 1);
+        state.collected_metrics.insert(format!("scenario_{}_score", current_scenario), score.score as f64);
+        state.collected_metrics.insert(format!("scenario_{}_accuracy", current_scenario), score.accuracy as f64);
         // Add more metrics from ScoreTracker and AdvancedMetrics...
 
 

@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { version = "0.13", features = ["dynamic_linking"] } # Use the latest Bevy version you prefer
+# Use dynamic linking for Bevy to avoid linker errors
+bevy = { version = "0.13", features = ["dynamic_linking"] }
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0" # For outputting results as JSON

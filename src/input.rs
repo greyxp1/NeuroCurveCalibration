@@ -73,7 +73,7 @@ pub fn process_mouse_input(
 
 // System to capture mouse button input (just logs for now)
 pub fn process_mouse_buttons(
-    mouse_button_input: Res<Input<MouseButton>>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
 ) {
     if mouse_button_input.just_pressed(MouseButton::Left) {
         // Logic for shooting/interaction is handled in target.rs (detect_target_hits)
