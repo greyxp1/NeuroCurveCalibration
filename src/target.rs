@@ -180,13 +180,14 @@ pub fn update_target_spawners(
                 rng.gen_range(spawner.spawn_area_min.z..spawner.spawn_area_max.z),
             );
 
-            let mut target_bundle = Target {
+            let target_bundle = Target {
                 radius: spawner.target_radius,
                 time_to_live: spawner.target_lifetime_secs.map(Duration::from_secs_f32),
                 ..Default::default()
             };
 
-            let hitbox = Hitbox::Sphere { radius: target_bundle.radius };
+            // Make hitbox slightly larger than visual representation for easier hits
+            let hitbox = Hitbox::Sphere { radius: target_bundle.radius * 1.2 };
             let movement = spawner.target_movement.clone(); // Clone movement pattern
 
             // Use Bevy's Lifetime component if TTL is set
@@ -266,7 +267,7 @@ pub fn update_score_tracker(
 
     // Check if a shot was fired this frame
     if mouse_button_input.just_pressed(MouseButton::Left) {
-         score_tracker.shots_fired_this_frame = true;
+        score_tracker.shots_fired_this_frame = true;
     }
 
      // Update hit/miss counts based on frame flags
@@ -287,14 +288,13 @@ pub fn update_score_tracker(
 
 // System to display the score (e.g., console output)
 pub fn display_score(score_tracker: Res<ScoreTracker>) {
-    // Can be triggered by change detection or run every frame
-    if score_tracker.is_changed() { // Only print when score changes
+    // Only print when a shot was fired this frame
+    if score_tracker.shots_fired_this_frame {
         println!(
             "Score: {}, Accuracy: {:.1}% (Hits: {}, Misses: {})",
             score_tracker.score, score_tracker.accuracy, score_tracker.hits, score_tracker.misses
         );
     }
-    // Or print every N frames/seconds for less spam
 }
 
 // --- Core Systems (related to Target) ---
@@ -306,7 +306,7 @@ pub fn update_target_lifetime(
     mut targets: Query<(Entity, &Target, &mut Lifetime)>, // Query Target to get points on timeout
     mut target_destroyed_events: EventWriter<TargetDestroyedEvent>,
 ) {
-    for (entity, target_info, mut lifetime) in targets.iter_mut() {
+    for (entity, _target_info, mut lifetime) in targets.iter_mut() {
         lifetime.timer.tick(time.delta());
         if lifetime.timer.finished() {
             target_destroyed_events.send(TargetDestroyedEvent {
@@ -322,7 +322,6 @@ pub fn update_target_lifetime(
 
 // System to handle target hit detection (using raycasting from camera)
 pub fn detect_target_hits(
-    mut commands: Commands,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     camera_query: Query<(&Camera, &GlobalTransform)>, // Use Camera and GlobalTransform for raycasting
     target_query: Query<(Entity, &GlobalTransform, &Target, &Hitbox)>,
@@ -336,11 +335,13 @@ pub fn detect_target_hits(
     let Ok(window) = windows.get_single() else { return; }; // Handle missing window
     let Ok((camera, camera_transform)) = camera_query.get_single() else { return; }; // Handle missing camera
 
-    // Use cursor position if available, otherwise center of window (fallback)
-    let Some(cursor_position) = window.cursor_position() else { return; };
+    // Use center of screen for hit detection to match the crosshair
+    let cursor_position = Vec2::new(
+        window.width() / 2.0,
+        window.height() / 2.0
+    );
 
-
-    // Cast ray from camera through cursor position
+    // Cast ray from camera through the center of the screen
     if let Some(ray) = camera.viewport_to_world(camera_transform, cursor_position) {
         let mut closest_hit: Option<(f32, Entity, Vec3, &Target)> = None;
 
@@ -361,7 +362,7 @@ pub fn detect_target_hits(
         }
 
         // Process the closest hit target
-        if let Some((_distance, entity, hit_position, target)) = closest_hit {
+        if let Some((_distance, entity, hit_position, _target)) = closest_hit {
             target_hit_events.send(TargetHitEvent {
                 target_entity: entity,
                 hit_position,
@@ -409,46 +410,7 @@ pub fn update_target_health(
     }
 }
 
-// System to provide visual hit feedback (spawns a short-lived effect)
-pub fn provide_hit_feedback(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut target_hit_events: EventReader<TargetHitEvent>,
-) {
-    for hit_event in target_hit_events.read() {
-        commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(Mesh::from(bevy::math::primitives::Sphere { radius: 0.1 })),
-                material: materials.add(StandardMaterial { base_color: Color::YELLOW, emissive: Color::YELLOW * 5.0, ..default() }), // Brighter emissive
-                transform: Transform::from_translation(hit_event.hit_position),
-                ..default()
-            },
-            NotShadowCaster,
-            // Use the Lifetime component for the effect as well
-            Lifetime { timer: Timer::new(Duration::from_millis(150), TimerMode::Once) },
-        ));
-    }
-}
-
-// System to update hit effect lifetimes (reuses the update_target_lifetime system)
-// We need a marker component to differentiate hit effects from targets if they use the same Lifetime component.
-#[derive(Component)]
-pub struct HitEffect;
-
-// Adjusted system to despawn hit effects based on their Lifetime component
-pub fn update_hit_effects(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut hit_effects: Query<(Entity, &mut Lifetime), With<HitEffect>>, // Query only entities with HitEffect marker
-) {
-    for (entity, mut lifetime) in hit_effects.iter_mut() {
-        lifetime.timer.tick(time.delta());
-        if lifetime.timer.finished() {
-            commands.entity(entity).despawn_recursive();
-        }
-    }
-}
+// Hit feedback systems removed
 
 
 // Setup a basic target spawner entity for testing
@@ -483,7 +445,6 @@ impl Plugin for TargetPlugin {
                 detect_target_hits,
                 update_target_health.after(detect_target_hits), // Process hits before destroying
                 update_target_lifetime, // Handle TTL timeouts
-                (provide_hit_feedback, update_hit_effects).after(update_target_health), // Provide feedback after health check
                 update_target_spawners,
                 update_target_movement,
                 update_score_tracker.after(update_target_health), // Update score after hits/destroys resolve
