@@ -354,16 +354,13 @@ fn spawn_random_target(
     let range_y = Uniform::new(2.0f32, 5.0).unwrap();
     let range_z = Uniform::new(1.0f32, 2.0).unwrap();
     let range_size = Uniform::new(0.3f32, 0.8).unwrap();
-    let range_color = Uniform::new(0.1f32, 1.0).unwrap();
     let x = rng.sample(range_x);
     let y = rng.sample(range_y);
     let z = rng.sample(range_z);
     let size = rng.sample(range_size);
-    let color = Color::srgb(
-        rng.sample(range_color),
-        rng.sample(range_color),
-        rng.sample(range_color),
-    );
+
+    // Use red color for all targets
+    let color = Color::srgb(1.0, 0.0, 0.0);
 
     let target_material = materials.add(StandardMaterial {
         base_color: color,
