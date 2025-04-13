@@ -7,6 +7,7 @@ name = "NeuroCalibration"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_diagnostic",
  "bevy_fps_controller",
  "bevy_rapier3d",
  "rand 0.9.0",

@@ -1,8 +1,8 @@
-
 use bevy::prelude::*;
 use bevy::render::camera::Exposure;
 use bevy::time::Stopwatch;
 use bevy::window::CursorGrabMode;
+use bevy_diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy_fps_controller::controller::*;
 use bevy_rapier3d::prelude::*;
 use rand::distr::Uniform;
@@ -22,6 +22,9 @@ pub struct Target;
 #[derive(Component)]
 struct PointsDisplay;
 
+#[derive(Component)]
+struct FpsDisplay;
+
 #[derive(Default, Resource)]
 struct Points {
     pub value: i32,
@@ -33,8 +36,6 @@ struct ShootTracker {
     spray_count: usize,
 }
 
-// Removed BulletImpact component as it's no longer needed
-
 fn main() {
     App::new()
         .insert_resource(AmbientLight {
@@ -42,8 +43,9 @@ fn main() {
             brightness: 6000.0,
         })
         .insert_resource(ClearColor(Color::srgb(0.83, 0.96, 0.96)))
-        .insert_resource(Points::default()) // Add this line
+        .insert_resource(Points::default())
         .add_plugins(DefaultPlugins)
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         //.add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(FpsControllerPlugin)
@@ -59,7 +61,7 @@ fn main() {
                 manage_cursor,
                 click_targets,
                 update_points_display,
-                // Removed despawn_bullet_impacts system as it's no longer needed
+                update_fps_display,
             ),
         ) // Add update_points_display system
         .run();
@@ -209,6 +211,12 @@ fn setup(
         },
         PointsDisplay,
     ));
+
+    // FPS counter
+    commands.spawn((Text::new("FPS: 0"),
+        Node { position_type: PositionType::Absolute, top: Val::Px(5.), right: Val::Px(15.), ..default() },
+        FpsDisplay,
+    ));
 }
 
 fn respawn(mut query: Query<(&mut Transform, &mut Velocity)>) {
@@ -301,11 +309,6 @@ fn click_targets(
             // Increment the spray count
             shoot_tracker.spray_count += 1;
 
-            // No need for sound-related variables anymore
-
-            // No sound effect for now
-            // We removed the gun sound and would need a proper laser sound file
-
             let ray_dir = camera_transform.forward().as_vec3() + camera_transform.rotation * spray;
             let max_toi: bevy_rapier3d::math::Real = 100.0;
             let solid = true;
@@ -319,7 +322,6 @@ fn click_targets(
                 let hit_point = ray_pos + ray_dir * Vec3::splat(toi.into());
                 println!("Hit entity {:?} at {:?}", entity, hit_point);
 
-                // Removed bullet impact sphere spawning code
 
                 // Handle the hit.
                 if let Ok(target_entity) = targets.get(entity) {
@@ -383,4 +385,11 @@ fn update_points_display(points: Res<Points>, mut query: Query<&mut Text, With<P
     }
 }
 
-// Removed despawn_bullet_impacts function as it's no longer needed
+fn update_fps_display(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut Text, With<FpsDisplay>>) {
+    if let Ok(mut text) = query.get_single_mut() {
+        let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS)
+            .and_then(|fps| fps.smoothed())
+            .map_or(0, |v| v as i32);
+        text.0 = format!("FPS: {}", fps);
+    }
+}
