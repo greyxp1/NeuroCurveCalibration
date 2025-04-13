@@ -5,16 +5,22 @@ use bevy_rapier3d::prelude::*;
 use rand::{distr::Uniform, prelude::*};
 use std::f32::consts::TAU;
 
+const SENSITIVITY_CM_PER_360: f32 = 10.0;
+const MOUSE_DPI: f32 = 1600.0;
 const SPAWN_POINT: Vec3 = Vec3::new(0.0, 1.625, 0.0);
 const ARENA_WIDTH: f32 = 100.0;
 const ARENA_DEPTH: f32 = 100.0;
 const ARENA_HEIGHT: f32 = 50.0;
 const WALL_THICKNESS: f32 = 1.0;
-const TARGET_ARENA_WIDTH: f32 = 95.0;
-const TARGET_ARENA_DEPTH: f32 = 95.0;
-const TARGET_ARENA_HEIGHT: f32 = 23.0;
+const TARGET_ARENA_WIDTH: f32 = 98.0;
+const TARGET_ARENA_DEPTH: f32 = 98.0;
+const TARGET_ARENA_HEIGHT: f32 = 48.0;
 const TARGET_SIZE: f32 = 1.5;
 const WALL_BIAS: f32 = 0.85;
+const PLAYER_HEIGHT: f32 = 10.0;
+const PLAYER_RADIUS: f32 = 0.5;
+const CAMERA_HEIGHT_OFFSET: f32 = 4.0;
+const CAMERA_FOV: f32 = TAU / 4.5;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct FpsControllerSetup;
@@ -57,10 +63,7 @@ fn main() {
         .run();
 }
 
-const PLAYER_HEIGHT: f32 = 10.0;
-const PLAYER_RADIUS: f32 = 0.5;
-const CAMERA_HEIGHT_OFFSET: f32 = 4.0;
-const CAMERA_FOV: f32 = TAU / 4.5;
+
 
 fn fps_controller_setup(mut commands: Commands) {
     // Create player entity
@@ -71,6 +74,10 @@ fn fps_controller_setup(mut commands: Commands) {
 }
 
 fn spawn_player(commands: &mut Commands) -> Entity {
+    // Calculate sensitivity based on cm/360
+    // Formula: sensitivity = (2*PI) / (cm_per_360 / 2.54 * dpi)
+    let sensitivity = TAU / (SENSITIVITY_CM_PER_360 / 2.54 * MOUSE_DPI);
+
     commands
         .spawn((
             Collider::cylinder(PLAYER_HEIGHT / 2.0, PLAYER_RADIUS),
@@ -81,7 +88,11 @@ fn spawn_player(commands: &mut Commands) -> Entity {
             AdditionalMassProperties::Mass(1.0), GravityScale(0.0), Ccd { enabled: true },
             Transform::from_translation(SPAWN_POINT), LogicalPlayer,
             FpsControllerInput { pitch: -TAU / 12.0, yaw: TAU * 5.0 / 8.0, ..default() },
-            FpsController { air_acceleration: 80.0, ..default() },
+            FpsController {
+                air_acceleration: 80.0,
+                sensitivity, // Use our calculated cm/360 sensitivity
+                ..default()
+            },
         ))
         .insert(CameraConfig { height_offset: CAMERA_HEIGHT_OFFSET })
         .insert(ShootTracker { stopwatch: Stopwatch::new(), spray_count: 0 })
@@ -244,6 +255,8 @@ fn setup_ui(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, material
     commands.spawn((Text::new("FPS: 0"),
                    Node { position_type: PositionType::Absolute, top: Val::Px(5.), right: Val::Px(15.), ..default() },
                    FpsDisplay));
+    commands.spawn((Text::new(format!("Sensitivity: {:.1} cm/360 @ {} DPI", SENSITIVITY_CM_PER_360, MOUSE_DPI as i32)),
+                   Node { position_type: PositionType::Absolute, bottom: Val::Px(5.), right: Val::Px(15.), ..default() }));
 }
 
 fn respawn(mut query: Query<(&mut Transform, &mut Velocity)>) {
@@ -414,3 +427,5 @@ fn update_fps_display(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut 
         text.0 = format!("FPS: {}", fps);
     }
 }
+
+
