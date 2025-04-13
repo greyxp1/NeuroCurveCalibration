@@ -5,6 +5,7 @@ use bevy_rapier3d::prelude::*;
 use rand::{distr::Uniform, prelude::*};
 use std::f32::consts::TAU;
 
+// Game constants
 const SENSITIVITY_CM_PER_360: f32 = 10.0;
 const MOUSE_DPI: f32 = 1600.0;
 const SPAWN_POINT: Vec3 = Vec3::new(0.0, 1.625, 0.0);
@@ -12,16 +13,15 @@ const ARENA_WIDTH: f32 = 200.0;
 const ARENA_DEPTH: f32 = 200.0;
 const ARENA_HEIGHT: f32 = 50.0;
 const WALL_THICKNESS: f32 = 1.0;
-const TARGET_ARENA_WIDTH: f32 = 195.0;
-const TARGET_ARENA_DEPTH: f32 = 195.0;
-const TARGET_ARENA_HEIGHT: f32 = 40.0;
 const TARGET_SIZE: f32 = 1.5;
-const WALL_BIAS: f32 = 0.95;
 const PLAYER_HEIGHT: f32 = 10.0;
 const PLAYER_RADIUS: f32 = 0.5;
 const CAMERA_HEIGHT_OFFSET: f32 = 4.0;
 const CAMERA_FOV: f32 = TAU / 4.5;
+const CENTER_SIZE: f32 = 8.0;
+const GRID_SPACING: f32 = 4.0;
 
+// Component and resource definitions
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct FpsControllerSetup;
 
@@ -46,11 +46,10 @@ fn main() {
         .insert_resource(AmbientLight { color: Color::WHITE, brightness: 2000.0 })
         .insert_resource(ClearColor(Color::srgb(0.1, 0.1, 0.15)))
         .insert_resource(Points::default())
-        // Configure window settings with vsync disabled for maximum performance
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: String::from("Kovaak's-Inspired Aim Trainer"),
-                present_mode: bevy::window::PresentMode::Immediate, // Disable vsync
+                title: String::from("Aim Trainer"),
+                present_mode: bevy::window::PresentMode::Immediate,
                 ..default()
             }),
             ..default()
@@ -116,10 +115,11 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut materials2d: ResMut<Assets<ColorMaterial>>,
 ) {
+    // Setup 2D camera for UI
+    commands.spawn((Camera2d, Camera { order: 2, ..default() }));
 
     // Lighting setup
     setup_lighting(&mut commands);
-    commands.spawn((Camera2d, Camera { order: 2, ..default() }));
 
     // Materials
     let materials_handles = setup_materials(&mut materials);
@@ -132,30 +132,39 @@ fn setup(
         spawn_random_target(&mut commands, &mut meshes, &mut materials);
     }
 
-    // UI elements
-    setup_ui(&mut commands, &mut meshes, &mut materials2d);
+    // UI elements - crosshair and text displays
+    let crosshair_material = materials2d.add(Color::srgb(0.0, 1.0, 1.0));
+    for (width, height) in [(10.0, 2.0), (2.0, 10.0)] {
+        commands.spawn((Mesh2d(meshes.add(Cuboid::new(width, height, 0.0))),
+                       MeshMaterial2d(crosshair_material.clone()),
+                       Transform::default()));
+    }
+
+    // Text displays
+    commands.spawn((Text::new("Points: 0"),
+                   Node { position_type: PositionType::Absolute, bottom: Val::Px(5.), left: Val::Px(15.), ..default() },
+                   PointsDisplay));
+    commands.spawn((Text::new("FPS: 0"),
+                   Node { position_type: PositionType::Absolute, top: Val::Px(5.), right: Val::Px(15.), ..default() },
+                   FpsDisplay));
+    commands.spawn((Text::new(format!("Sensitivity: {:.1} cm/360 @ {} DPI", SENSITIVITY_CM_PER_360, MOUSE_DPI as i32)),
+                   Node { position_type: PositionType::Absolute, bottom: Val::Px(5.), right: Val::Px(15.), ..default() }));
 }
 
 fn setup_lighting(commands: &mut Commands) {
-    // Main lights
+    // Main directional light
     commands.spawn((DirectionalLight { illuminance: light_consts::lux::OVERCAST_DAY, shadows_enabled: true, ..default() },
                    Transform::from_xyz(0.0, 40.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z)));
+
+    // Center light
     commands.spawn((PointLight { color: Color::srgb(0.9, 0.9, 1.0), intensity: 10000.0, range: 120.0, ..default() },
                    Transform::from_xyz(0.0, 20.0, 0.0)));
 
     // Corner lights
-    for (x, z) in [(-45.0, -45.0), (45.0, -45.0), (-45.0, 45.0), (45.0, 45.0)].iter() {
+    for (x, z) in [(-ARENA_WIDTH/4.0, -ARENA_DEPTH/4.0), (ARENA_WIDTH/4.0, -ARENA_DEPTH/4.0),
+                  (-ARENA_WIDTH/4.0, ARENA_DEPTH/4.0), (ARENA_WIDTH/4.0, ARENA_DEPTH/4.0)] {
         commands.spawn((PointLight { color: Color::srgb(0.8, 0.8, 1.0), intensity: 5000.0, range: 80.0, ..default() },
-                       Transform::from_xyz(*x, 20.0, *z)));
-    }
-
-    // Fill lights
-    for x in [-30.0, 0.0, 30.0].iter() {
-        for z in [-30.0, 0.0, 30.0].iter() {
-            if *x == 0.0 && *z == 0.0 { continue; }
-            commands.spawn((PointLight { color: Color::srgb(0.8, 0.8, 1.0), intensity: 3000.0, range: 60.0, ..default() },
-                           Transform::from_xyz(*x, 15.0, *z)));
-        }
+                       Transform::from_xyz(x, 20.0, z)));
     }
 }
 
@@ -190,8 +199,7 @@ fn setup_materials(materials: &mut ResMut<Assets<StandardMaterial>>) -> Material
     }
 }
 
-// Define the size of the red center area - 4 grid squares (each grid square is 4 units)
-const CENTER_SIZE: f32 = 8.0;
+
 
 fn setup_arena(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &MaterialHandles) {
     // Main ground collider (covers the entire floor)
@@ -211,14 +219,13 @@ fn setup_arena(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, mater
     // Grid lines
     let line_thickness = 0.2;
     let line_height = 0.05;
-    let grid_spacing = 4.0;
 
     // Calculate grid range based on arena dimensions
     let half_width = ARENA_WIDTH / 2.0;
     let half_depth = ARENA_DEPTH / 2.0;
 
     // Create grid lines along X axis (width)
-    for x in (-half_width as i32..=half_width as i32).step_by(grid_spacing as usize) {
+    for x in (-half_width as i32..=half_width as i32).step_by(GRID_SPACING as usize) {
         let x_pos = x as f32;
         commands.spawn((Mesh3d(meshes.add(Cuboid::new(line_thickness, line_height, ARENA_DEPTH))),
                        MeshMaterial3d(materials.grid.clone()),
@@ -226,7 +233,7 @@ fn setup_arena(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, mater
     }
 
     // Create grid lines along Z axis (depth)
-    for z in (-half_depth as i32..=half_depth as i32).step_by(grid_spacing as usize) {
+    for z in (-half_depth as i32..=half_depth as i32).step_by(GRID_SPACING as usize) {
         let z_pos = z as f32;
         commands.spawn((Mesh3d(meshes.add(Cuboid::new(ARENA_WIDTH, line_height, line_thickness))),
                        MeshMaterial3d(materials.grid.clone()),
@@ -251,25 +258,7 @@ fn setup_arena(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, mater
     }
 }
 
-fn setup_ui(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials2d: &mut ResMut<Assets<ColorMaterial>>) {
-    // Crosshair
-    let crosshair_material = materials2d.add(Color::srgb(0.0, 1.0, 1.0));
-    for (width, height) in [(10.0, 2.0), (2.0, 10.0)] {
-        commands.spawn((Mesh2d(meshes.add(Cuboid::new(width, height, 0.0))),
-                       MeshMaterial2d(crosshair_material.clone()),
-                       Transform::default()));
-    }
 
-    // Text displays
-    commands.spawn((Text::new("Points: 0"),
-                   Node { position_type: PositionType::Absolute, bottom: Val::Px(5.), left: Val::Px(15.), ..default() },
-                   PointsDisplay));
-    commands.spawn((Text::new("FPS: 0"),
-                   Node { position_type: PositionType::Absolute, top: Val::Px(5.), right: Val::Px(15.), ..default() },
-                   FpsDisplay));
-    commands.spawn((Text::new(format!("Sensitivity: {:.1} cm/360 @ {} DPI", SENSITIVITY_CM_PER_360, MOUSE_DPI as i32)),
-                   Node { position_type: PositionType::Absolute, bottom: Val::Px(5.), right: Val::Px(15.), ..default() }));
-}
 
 fn respawn(mut query: Query<(&mut Transform, &mut Velocity)>) {
     for (mut transform, mut velocity) in &mut query {
@@ -375,45 +364,15 @@ fn spawn_random_target(
     materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
     let mut rng = rand::rng();
-    let y = rng.sample(Uniform::new(1.0, TARGET_ARENA_HEIGHT - 2.0).unwrap());
+    let y = rng.sample(Uniform::new(1.0, ARENA_HEIGHT - 2.0).unwrap());
+    let margin = 5.0; // Margin from walls
 
-    // Define wall distance - how close to the wall targets should spawn
-    // Lower values = closer to walls
-    let wall_distance = (1.0 - WALL_BIAS) * TARGET_ARENA_WIDTH / 2.0;
-
-    // Calculate target position based on wall choice
-    let pos = match rng.random_range(0..5) {
-        0 => Vec3::new(
-            // Left wall - fixed X near wall, random Z
-            -TARGET_ARENA_WIDTH/2.0 + wall_distance,
-            y,
-            rng.sample(Uniform::new(-TARGET_ARENA_DEPTH/2.0 + 2.0, TARGET_ARENA_DEPTH/2.0 - 2.0).unwrap())
-        ),
-        1 => Vec3::new(
-            // Right wall - fixed X near wall, random Z
-            TARGET_ARENA_WIDTH/2.0 - wall_distance,
-            y,
-            rng.sample(Uniform::new(-TARGET_ARENA_DEPTH/2.0 + 2.0, TARGET_ARENA_DEPTH/2.0 - 2.0).unwrap())
-        ),
-        2 => Vec3::new(
-            // Back wall - random X, fixed Z near wall
-            rng.sample(Uniform::new(-TARGET_ARENA_WIDTH/2.0 + 2.0, TARGET_ARENA_WIDTH/2.0 - 2.0).unwrap()),
-            y,
-            TARGET_ARENA_DEPTH/2.0 - wall_distance
-        ),
-        3 => Vec3::new(
-            // Front wall - random X, fixed Z near wall
-            rng.sample(Uniform::new(-TARGET_ARENA_WIDTH/2.0 + 2.0, TARGET_ARENA_WIDTH/2.0 - 2.0).unwrap()),
-            y,
-            -TARGET_ARENA_DEPTH/2.0 + wall_distance
-        ),
-        _ => Vec3::new(
-            // Random position (not near any wall)
-            rng.sample(Uniform::new(-TARGET_ARENA_WIDTH/2.0 + 2.0, TARGET_ARENA_WIDTH/2.0 - 2.0).unwrap()),
-            y,
-            rng.sample(Uniform::new(-TARGET_ARENA_DEPTH/2.0 + 2.0, TARGET_ARENA_DEPTH/2.0 - 2.0).unwrap())
-        ),
-    };
+    // Calculate random position within arena bounds
+    let pos = Vec3::new(
+        rng.sample(Uniform::new(-ARENA_WIDTH/2.0 + margin, ARENA_WIDTH/2.0 - margin).unwrap()),
+        y,
+        rng.sample(Uniform::new(-ARENA_DEPTH/2.0 + margin, ARENA_DEPTH/2.0 - margin).unwrap())
+    );
 
     // Create target material
     let target_material = materials.add(StandardMaterial {
