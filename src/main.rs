@@ -12,11 +12,11 @@ const ARENA_WIDTH: f32 = 100.0;
 const ARENA_DEPTH: f32 = 100.0;
 const ARENA_HEIGHT: f32 = 50.0;
 const WALL_THICKNESS: f32 = 1.0;
-const TARGET_ARENA_WIDTH: f32 = 98.0;
-const TARGET_ARENA_DEPTH: f32 = 98.0;
-const TARGET_ARENA_HEIGHT: f32 = 48.0;
+const TARGET_ARENA_WIDTH: f32 = 95.0;
+const TARGET_ARENA_DEPTH: f32 = 95.0;
+const TARGET_ARENA_HEIGHT: f32 = 40.0;
 const TARGET_SIZE: f32 = 1.5;
-const WALL_BIAS: f32 = 0.85;
+const WALL_BIAS: f32 = 0.95;
 const PLAYER_HEIGHT: f32 = 10.0;
 const PLAYER_RADIUS: f32 = 0.5;
 const CAMERA_HEIGHT_OFFSET: f32 = 4.0;
@@ -380,18 +380,42 @@ fn spawn_random_target(
     let mut rng = rand::rng();
     let y = rng.sample(Uniform::new(1.0, TARGET_ARENA_HEIGHT - 2.0).unwrap());
 
+    // Define wall distance - how close to the wall targets should spawn
+    // Lower values = closer to walls
+    let wall_distance = (1.0 - WALL_BIAS) * TARGET_ARENA_WIDTH / 2.0;
+
     // Calculate target position based on wall choice
     let pos = match rng.random_range(0..5) {
-        0 => Vec3::new(-TARGET_ARENA_WIDTH/2.0 * WALL_BIAS, y,
-                      rng.sample(Uniform::new(-TARGET_ARENA_DEPTH/2.0 + 2.0, TARGET_ARENA_DEPTH/2.0 - 2.0).unwrap())),
-        1 => Vec3::new(TARGET_ARENA_WIDTH/2.0 * WALL_BIAS, y,
-                      rng.sample(Uniform::new(-TARGET_ARENA_DEPTH/2.0 + 2.0, TARGET_ARENA_DEPTH/2.0 - 2.0).unwrap())),
-        2 => Vec3::new(rng.sample(Uniform::new(-TARGET_ARENA_WIDTH/2.0 + 2.0, TARGET_ARENA_WIDTH/2.0 - 2.0).unwrap()),
-                      y, TARGET_ARENA_DEPTH/2.0 * WALL_BIAS),
-        3 => Vec3::new(rng.sample(Uniform::new(-TARGET_ARENA_WIDTH/2.0 + 2.0, TARGET_ARENA_WIDTH/2.0 - 2.0).unwrap()),
-                      y, -TARGET_ARENA_DEPTH/2.0 * WALL_BIAS),
-        _ => Vec3::new(rng.sample(Uniform::new(-TARGET_ARENA_WIDTH/2.0 + 2.0, TARGET_ARENA_WIDTH/2.0 - 2.0).unwrap()), y,
-                      rng.sample(Uniform::new(-TARGET_ARENA_DEPTH/2.0 + 2.0, TARGET_ARENA_DEPTH/2.0 - 2.0).unwrap())),
+        0 => Vec3::new(
+            // Left wall - fixed X near wall, random Z
+            -TARGET_ARENA_WIDTH/2.0 + wall_distance,
+            y,
+            rng.sample(Uniform::new(-TARGET_ARENA_DEPTH/2.0 + 2.0, TARGET_ARENA_DEPTH/2.0 - 2.0).unwrap())
+        ),
+        1 => Vec3::new(
+            // Right wall - fixed X near wall, random Z
+            TARGET_ARENA_WIDTH/2.0 - wall_distance,
+            y,
+            rng.sample(Uniform::new(-TARGET_ARENA_DEPTH/2.0 + 2.0, TARGET_ARENA_DEPTH/2.0 - 2.0).unwrap())
+        ),
+        2 => Vec3::new(
+            // Back wall - random X, fixed Z near wall
+            rng.sample(Uniform::new(-TARGET_ARENA_WIDTH/2.0 + 2.0, TARGET_ARENA_WIDTH/2.0 - 2.0).unwrap()),
+            y,
+            TARGET_ARENA_DEPTH/2.0 - wall_distance
+        ),
+        3 => Vec3::new(
+            // Front wall - random X, fixed Z near wall
+            rng.sample(Uniform::new(-TARGET_ARENA_WIDTH/2.0 + 2.0, TARGET_ARENA_WIDTH/2.0 - 2.0).unwrap()),
+            y,
+            -TARGET_ARENA_DEPTH/2.0 + wall_distance
+        ),
+        _ => Vec3::new(
+            // Random position (not near any wall)
+            rng.sample(Uniform::new(-TARGET_ARENA_WIDTH/2.0 + 2.0, TARGET_ARENA_WIDTH/2.0 - 2.0).unwrap()),
+            y,
+            rng.sample(Uniform::new(-TARGET_ARENA_DEPTH/2.0 + 2.0, TARGET_ARENA_DEPTH/2.0 - 2.0).unwrap())
+        ),
     };
 
     // Create target material
