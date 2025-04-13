@@ -99,13 +99,10 @@ struct TargetMovement {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MovementPattern {
-    Static,
-    Linear,
-    Circular,
-    Random,
-    Reactive,
-    Smooth,
-    Evasive,
+    Static,   // No movement
+    Linear,   // Simple linear movement with bouncing
+    Circular, // Circular or figure-8 patterns
+    Random,   // Random movement with direction changes
 }
 
 #[derive(Component)]
@@ -144,10 +141,8 @@ fn main() {
             respawn,
             manage_cursor,
             click_targets,
-            update_fps_display,
-            update_points_display,
+            update_displays,
             manage_scenarios,
-            update_scenario_display,
             update_target_movements,
         ))
         .run();
@@ -155,49 +150,40 @@ fn main() {
 
 
 
+// Setup player and camera
 fn fps_controller_setup(mut commands: Commands) {
-    // Create player entity
-    let logical_entity = spawn_player(&mut commands);
-
-    // Create camera entity
-    spawn_camera(&mut commands, logical_entity);
-}
-
-fn spawn_player(commands: &mut Commands) -> Entity {
     // Calculate sensitivity based on cm/360
-    // Formula: sensitivity = (2*PI) / (cm_per_360 / 2.54 * dpi)
     let sensitivity = TAU / (SENSITIVITY_CM_PER_360 / 2.54 * MOUSE_DPI);
 
-    commands
-        .spawn((
-            Collider::cylinder(PLAYER_HEIGHT / 2.0, PLAYER_RADIUS),
-            Friction { coefficient: 0.0, combine_rule: CoefficientCombineRule::Min },
-            Restitution { coefficient: 0.0, combine_rule: CoefficientCombineRule::Min },
-            ActiveEvents::COLLISION_EVENTS, Velocity::zero(), RigidBody::Dynamic,
-            Sleeping::disabled(), LockedAxes::ROTATION_LOCKED,
-            AdditionalMassProperties::Mass(1.0), GravityScale(0.0), Ccd { enabled: true },
-            Transform::from_translation(SPAWN_POINT), LogicalPlayer,
-            // Set pitch to 0 (looking straight ahead) and yaw to 0 (facing negative Z direction)
-            FpsControllerInput { pitch: 0.0, yaw: 0.0, ..default() },
-            FpsController {
-                air_acceleration: 80.0,
-                sensitivity, // Use our calculated cm/360 sensitivity
-                ..default()
-            },
-        ))
+    // Create player entity
+    let player = commands.spawn_empty()
+        .insert(Collider::cylinder(PLAYER_HEIGHT / 2.0, PLAYER_RADIUS))
+        .insert(Friction { coefficient: 0.0, combine_rule: CoefficientCombineRule::Min })
+        .insert(Restitution { coefficient: 0.0, combine_rule: CoefficientCombineRule::Min })
+        .insert(ActiveEvents::COLLISION_EVENTS)
+        .insert(Velocity::zero())
+        .insert(RigidBody::Dynamic)
+        .insert(Sleeping::disabled())
+        .insert(LockedAxes::ROTATION_LOCKED)
+        .insert(AdditionalMassProperties::Mass(1.0))
+        .insert(GravityScale(0.0))
+        .insert(Ccd { enabled: true })
+        .insert(Transform::from_translation(SPAWN_POINT))
+        .insert(LogicalPlayer)
+        .insert(FpsControllerInput { pitch: 0.0, yaw: 0.0, ..default() })
+        .insert(FpsController { air_acceleration: 80.0, sensitivity, ..default() })
         .insert(CameraConfig { height_offset: CAMERA_HEIGHT_OFFSET })
         .insert(ShootTracker { stopwatch: Stopwatch::new() })
         .insert(SpatialListener::new(0.5))
-        .id()
-}
+        .id();
 
-fn spawn_camera(commands: &mut Commands, logical_entity: Entity) {
+    // Create camera entity linked to player
     commands.spawn((
         Camera3d::default(),
         Camera { order: 0, ..default() },
         Projection::Perspective(PerspectiveProjection { fov: CAMERA_FOV, ..default() }),
         Exposure::SUNLIGHT,
-        RenderPlayer { logical_entity },
+        RenderPlayer { logical_entity: player },
     ));
 }
 
@@ -210,24 +196,95 @@ fn setup(
     // Setup 2D camera for UI
     commands.spawn((Camera2d, Camera { order: 2, ..default() }));
 
-    // Lighting setup
-    setup_lighting(&mut commands);
+    // Setup lighting
+    // Main directional light
+    commands.spawn((DirectionalLight { illuminance: light_consts::lux::OVERCAST_DAY, shadows_enabled: true, ..default() },
+                   Transform::from_xyz(0.0, 40.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z)));
 
-    // Materials
-    let materials_handles = setup_materials(&mut materials);
+    // Center light
+    commands.spawn((PointLight { color: Color::srgb(0.9, 0.9, 1.0), intensity: 10000.0, range: 120.0, ..default() },
+                   Transform::from_xyz(0.0, 20.0, 0.0)));
 
-    // Arena construction
-    setup_arena(&mut commands, &mut meshes, &materials_handles);
+    // Corner lights
+    for (x, z) in [(-ARENA_WIDTH/4.0, -ARENA_DEPTH/4.0), (ARENA_WIDTH/4.0, -ARENA_DEPTH/4.0),
+                  (-ARENA_WIDTH/4.0, ARENA_DEPTH/4.0), (ARENA_WIDTH/4.0, ARENA_DEPTH/4.0)] {
+        commands.spawn((PointLight { color: Color::srgb(0.8, 0.8, 1.0), intensity: 5000.0, range: 80.0, ..default() },
+                       Transform::from_xyz(x, 20.0, z)));
+    }
 
-    // Spawn targets
+    // Setup materials
+    let ground = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.15, 0.15, 0.15), perceptual_roughness: 0.9, cull_mode: None, ..default()
+    });
+    let wall = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 0.2, 0.25), perceptual_roughness: 0.8, cull_mode: None, ..default()
+    });
+    let grid = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.3, 0.3, 0.35), emissive: Color::srgb(0.3, 0.3, 0.35).into(),
+        unlit: true, ..default()
+    });
+    let center_floor = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.0, 0.0), emissive: Color::srgb(0.5, 0.0, 0.0).into(),
+        perceptual_roughness: 0.3, metallic: 0.2, reflectance: 0.5, cull_mode: None, ..default()
+    });
+
+    // Setup arena
+    // Main ground collider and floor
+    commands.spawn((Collider::cuboid(ARENA_WIDTH/2.0, 0.1, ARENA_DEPTH/2.0), RigidBody::Fixed,
+                   Transform::from_translation(Vec3::new(0.0, -0.5, 0.0))));
+    commands.spawn((Mesh3d(meshes.add(Cuboid::new(ARENA_WIDTH, 0.1, ARENA_DEPTH))),
+                   MeshMaterial3d(ground.clone()),
+                   Transform::from_translation(Vec3::new(0.0, -0.5, 0.0))));
+
+    // Center floor (red)
+    commands.spawn((Mesh3d(meshes.add(Cuboid::new(CENTER_SIZE, 0.1, CENTER_SIZE))),
+                   MeshMaterial3d(center_floor),
+                   Transform::from_translation(Vec3::new(0.0, -0.44, 0.0))));
+
+    // Grid lines
+    let line_thickness = 0.2;
+    let line_height = 0.05;
+    let half_width = ARENA_WIDTH / 2.0;
+    let half_depth = ARENA_DEPTH / 2.0;
+
+    // X-axis grid lines
+    for x in (-half_width as i32..=half_width as i32).step_by(GRID_SPACING as usize) {
+        commands.spawn((Mesh3d(meshes.add(Cuboid::new(line_thickness, line_height, ARENA_DEPTH))),
+                       MeshMaterial3d(grid.clone()),
+                       Transform::from_translation(Vec3::new(x as f32, -0.45, 0.0))));
+    }
+
+    // Z-axis grid lines
+    for z in (-half_depth as i32..=half_depth as i32).step_by(GRID_SPACING as usize) {
+        commands.spawn((Mesh3d(meshes.add(Cuboid::new(ARENA_WIDTH, line_height, line_thickness))),
+                       MeshMaterial3d(grid.clone()),
+                       Transform::from_translation(Vec3::new(0.0, -0.45, z as f32))));
+    }
+
+    // Walls and ceiling
+    let wall_configs = [
+        [ARENA_WIDTH, ARENA_HEIGHT, WALL_THICKNESS, 0.0, ARENA_HEIGHT/2.0 - 0.5, ARENA_DEPTH/2.0],
+        [ARENA_WIDTH, ARENA_HEIGHT, WALL_THICKNESS, 0.0, ARENA_HEIGHT/2.0 - 0.5, -ARENA_DEPTH/2.0],
+        [WALL_THICKNESS, ARENA_HEIGHT, ARENA_DEPTH, -ARENA_WIDTH/2.0, ARENA_HEIGHT/2.0 - 0.5, 0.0],
+        [WALL_THICKNESS, ARENA_HEIGHT, ARENA_DEPTH, ARENA_WIDTH/2.0, ARENA_HEIGHT/2.0 - 0.5, 0.0],
+        [ARENA_WIDTH, WALL_THICKNESS, ARENA_DEPTH, 0.0, ARENA_HEIGHT - 0.5, 0.0]
+    ];
+
+    for [width, height, depth, x, y, z] in wall_configs {
+        commands.spawn((Collider::cuboid(width/2.0, height/2.0, depth/2.0), RigidBody::Fixed,
+                       Transform::from_translation(Vec3::new(x, y, z))));
+        commands.spawn((Mesh3d(meshes.add(Cuboid::new(width, height, depth))),
+                       MeshMaterial3d(wall.clone()),
+                       Transform::from_translation(Vec3::new(x, y, z))));
+    }
+
+    // Spawn initial targets
     for _ in 0..10 {
         spawn_random_target(&mut commands, &mut meshes, &mut materials);
     }
 
-    // UI elements - dot crosshair and text displays
+    // UI elements - dot crosshair
     let crosshair_material = materials2d.add(Color::srgb(0.0, 1.0, 1.0));
-
-    // Create a small dot as the crosshair
     let dot_size = 2.0; // Size of the dot in pixels
     commands.spawn((Mesh2d(meshes.add(Cuboid::new(dot_size, dot_size, 0.0))),
                    MeshMaterial2d(crosshair_material),
@@ -246,115 +303,6 @@ fn setup(
                    Node { position_type: PositionType::Absolute, top: Val::Px(50.), left: Val::Px(15.), ..default() },
                    ScenarioDisplay));
 }
-
-fn setup_lighting(commands: &mut Commands) {
-    // Main directional light
-    commands.spawn((DirectionalLight { illuminance: light_consts::lux::OVERCAST_DAY, shadows_enabled: true, ..default() },
-                   Transform::from_xyz(0.0, 40.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z)));
-
-    // Center light
-    commands.spawn((PointLight { color: Color::srgb(0.9, 0.9, 1.0), intensity: 10000.0, range: 120.0, ..default() },
-                   Transform::from_xyz(0.0, 20.0, 0.0)));
-
-    // Corner lights
-    for (x, z) in [(-ARENA_WIDTH/4.0, -ARENA_DEPTH/4.0), (ARENA_WIDTH/4.0, -ARENA_DEPTH/4.0),
-                  (-ARENA_WIDTH/4.0, ARENA_DEPTH/4.0), (ARENA_WIDTH/4.0, ARENA_DEPTH/4.0)] {
-        commands.spawn((PointLight { color: Color::srgb(0.8, 0.8, 1.0), intensity: 5000.0, range: 80.0, ..default() },
-                       Transform::from_xyz(x, 20.0, z)));
-    }
-}
-
-struct MaterialHandles {
-    ground: Handle<StandardMaterial>,
-    wall: Handle<StandardMaterial>,
-    grid: Handle<StandardMaterial>,
-    center_floor: Handle<StandardMaterial>,
-}
-
-fn setup_materials(materials: &mut ResMut<Assets<StandardMaterial>>) -> MaterialHandles {
-    MaterialHandles {
-        ground: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.15, 0.15, 0.15), perceptual_roughness: 0.9, cull_mode: None, ..default()
-        }),
-        wall: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.2, 0.2, 0.25), perceptual_roughness: 0.8, cull_mode: None, ..default()
-        }),
-        grid: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.3, 0.3, 0.35), emissive: Color::srgb(0.3, 0.3, 0.35).into(),
-            unlit: true, ..default()
-        }),
-        center_floor: materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.0, 0.0), // Pure bright red
-            emissive: Color::srgb(0.5, 0.0, 0.0).into(), // Add glow effect
-            perceptual_roughness: 0.3, // More shiny
-            metallic: 0.2,
-            reflectance: 0.5, // More reflective
-            cull_mode: None,
-            ..default()
-        }),
-    }
-}
-
-
-
-fn setup_arena(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &MaterialHandles) {
-    // Main ground collider (covers the entire floor)
-    commands.spawn((Collider::cuboid(ARENA_WIDTH/2.0, 0.1, ARENA_DEPTH/2.0), RigidBody::Fixed,
-                   Transform::from_translation(Vec3::new(0.0, -0.5, 0.0))));
-
-    // Outer ground (dark gray)
-    commands.spawn((Mesh3d(meshes.add(Cuboid::new(ARENA_WIDTH, 0.1, ARENA_DEPTH))),
-                   MeshMaterial3d(materials.ground.clone()),
-                   Transform::from_translation(Vec3::new(0.0, -0.5, 0.0))));
-
-    // Center floor (red) - positioned slightly above the main floor to be more visible
-    commands.spawn((Mesh3d(meshes.add(Cuboid::new(CENTER_SIZE, 0.1, CENTER_SIZE))),
-                   MeshMaterial3d(materials.center_floor.clone()),
-                   Transform::from_translation(Vec3::new(0.0, -0.44, 0.0))));
-
-    // Grid lines
-    let line_thickness = 0.2;
-    let line_height = 0.05;
-
-    // Calculate grid range based on arena dimensions
-    let half_width = ARENA_WIDTH / 2.0;
-    let half_depth = ARENA_DEPTH / 2.0;
-
-    // Create grid lines along X axis (width)
-    for x in (-half_width as i32..=half_width as i32).step_by(GRID_SPACING as usize) {
-        let x_pos = x as f32;
-        commands.spawn((Mesh3d(meshes.add(Cuboid::new(line_thickness, line_height, ARENA_DEPTH))),
-                       MeshMaterial3d(materials.grid.clone()),
-                       Transform::from_translation(Vec3::new(x_pos, -0.45, 0.0))));
-    }
-
-    // Create grid lines along Z axis (depth)
-    for z in (-half_depth as i32..=half_depth as i32).step_by(GRID_SPACING as usize) {
-        let z_pos = z as f32;
-        commands.spawn((Mesh3d(meshes.add(Cuboid::new(ARENA_WIDTH, line_height, line_thickness))),
-                       MeshMaterial3d(materials.grid.clone()),
-                       Transform::from_translation(Vec3::new(0.0, -0.45, z_pos))));
-    }
-
-    // Walls and ceiling
-    let wall_configs = [
-        [ARENA_WIDTH, ARENA_HEIGHT, WALL_THICKNESS, 0.0, ARENA_HEIGHT/2.0 - 0.5, ARENA_DEPTH/2.0],
-        [ARENA_WIDTH, ARENA_HEIGHT, WALL_THICKNESS, 0.0, ARENA_HEIGHT/2.0 - 0.5, -ARENA_DEPTH/2.0],
-        [WALL_THICKNESS, ARENA_HEIGHT, ARENA_DEPTH, -ARENA_WIDTH/2.0, ARENA_HEIGHT/2.0 - 0.5, 0.0],
-        [WALL_THICKNESS, ARENA_HEIGHT, ARENA_DEPTH, ARENA_WIDTH/2.0, ARENA_HEIGHT/2.0 - 0.5, 0.0],
-        [ARENA_WIDTH, WALL_THICKNESS, ARENA_DEPTH, 0.0, ARENA_HEIGHT - 0.5, 0.0]
-    ];
-
-    for [width, height, depth, x, y, z] in wall_configs {
-        commands.spawn((Collider::cuboid(width/2.0, height/2.0, depth/2.0), RigidBody::Fixed,
-                       Transform::from_translation(Vec3::new(x, y, z))));
-        commands.spawn((Mesh3d(meshes.add(Cuboid::new(width, height, depth))),
-                       MeshMaterial3d(materials.wall.clone()),
-                       Transform::from_translation(Vec3::new(x, y, z))));
-    }
-}
-
-
 
 fn respawn(mut query: Query<(&mut Transform, &mut Velocity)>) {
     for (mut transform, mut velocity) in &mut query {
@@ -387,8 +335,6 @@ fn set_cursor_state(window: &mut Window, controller: &mut FpsController, gamepla
     controller.enable_input = gameplay_active;
 }
 
-
-
 fn click_targets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -402,36 +348,30 @@ fn click_targets(
     mut shoot_stopwatch: Query<&mut ShootTracker>,
     time: Res<Time>,
 ) {
-    // Get player and update shoot tracker
+    // Get player and check if we can shoot
     let player_handle = player_query.single();
-    let mut shoot_tracker = shoot_stopwatch.get_mut(player_handle).expect("LogicalPlayer needs ShootTracker");
+    let mut shoot_tracker = shoot_stopwatch.get_mut(player_handle).unwrap();
     shoot_tracker.stopwatch.tick(time.delta());
 
-    // Early returns
-    if !buttons.pressed(MouseButton::Left) { return; }
-    if shoot_tracker.stopwatch.elapsed_secs() <= 0.1 { return; }
+    // Early returns if not shooting or on cooldown
+    if !buttons.pressed(MouseButton::Left) || shoot_tracker.stopwatch.elapsed_secs() <= 0.1 {
+        return;
+    }
 
-    // Get camera transform once
+    // Cast ray from camera
     let camera_transform = camera.single();
-
-    // Cast ray and handle hit
     let ray_pos = camera_transform.translation;
     let ray_dir = camera_transform.forward().as_vec3();
-    let filter = QueryFilter::new().exclude_sensors().exclude_rigid_body(player_handle);
-
-    // Calculate maximum possible distance in the arena (diagonal + some margin)
     let max_distance = (ARENA_WIDTH.powi(2) + ARENA_DEPTH.powi(2) + ARENA_HEIGHT.powi(2)).sqrt() * 1.5;
 
-    // Process hit result with increased ray distance
+    // Process hit and reset cooldown
+    let filter = QueryFilter::new().exclude_sensors().exclude_rigid_body(player_handle);
     process_hit_result(
         rapier_context.single().cast_ray(ray_pos, ray_dir, max_distance, true, filter),
         &mut commands, &mut meshes, &mut materials, &targets, &mut points
     );
-
     shoot_tracker.stopwatch.reset();
 }
-
-
 
 fn process_hit_result(
     hit_result: Option<(Entity, f32)>,
@@ -441,52 +381,55 @@ fn process_hit_result(
     targets: &Query<Entity, With<Target>>,
     points: &mut ResMut<Points>,
 ) {
-    if let Some((entity, _)) = hit_result {
-        if targets.get(entity).is_ok() {
+    // Adjust points based on hit result
+    match hit_result {
+        Some((entity, _)) if targets.get(entity).is_ok() => {
+            // Hit a target - add point, despawn it, spawn a new one
             commands.entity(entity).despawn_recursive();
             spawn_random_target(commands, meshes, materials);
             points.value += 1;
-        } else {
-            points.value -= 1;
-        }
-    } else {
-        points.value -= 1;
+        },
+        _ => points.value -= 1, // Missed or hit non-target - subtract point
     }
 }
 
-fn spawn_random_target(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+// Update all UI displays
+fn update_displays(
+    points: Res<Points>,
+    diagnostics: Res<DiagnosticsStore>,
+    mut points_query: Query<&mut Text, With<PointsDisplay>>,
+    mut fps_query: Query<&mut Text, (With<FpsDisplay>, Without<PointsDisplay>)>,
+    mut scenario_query: Query<&mut Text, (With<ScenarioDisplay>, Without<PointsDisplay>, Without<FpsDisplay>)>,
+    scenario_state: Res<ScenarioState>,
 ) {
-    // Use the helper function to spawn within FOV
-    let mut rng = rand::rng();
-
-    // Randomly choose a movement pattern
-    let patterns = [
-        MovementPattern::Static,
-        MovementPattern::Linear,
-        MovementPattern::Circular,
-        MovementPattern::Random,
-    ];
-    let pattern = patterns[rng.random_range(0..patterns.len())];
-    let max_speed = if pattern == MovementPattern::Static { 0.0 } else { rng.random_range(3.0..10.0) };
-
-    spawn_target_in_fov(commands, meshes, materials, pattern, max_speed);
-}
-
-fn update_points_display(points: Res<Points>, mut query: Query<&mut Text, With<PointsDisplay>>) {
-    if let Ok(mut text) = query.get_single_mut() {
+    // Update points display
+    if let Ok(mut text) = points_query.get_single_mut() {
         text.0 = format!("Points: {}", points.value);
     }
-}
 
-fn update_fps_display(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut Text, With<FpsDisplay>>) {
-    if let Ok(mut text) = query.get_single_mut() {
+    // Update FPS display
+    if let Ok(mut text) = fps_query.get_single_mut() {
         let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS)
             .and_then(|fps| fps.smoothed())
             .map_or(0, |v| v as i32);
         text.0 = format!("FPS: {}", fps);
+    }
+
+    // Update scenario display
+    if let Ok(mut text) = scenario_query.get_single_mut() {
+        text.0 = if !scenario_state.has_started {
+            "Press SPACE to start scenarios".to_string()
+        } else if scenario_state.is_active {
+            let scenario_type = scenario_state.current_type.unwrap();
+            let remaining = scenario_state.scenario_timer.remaining_secs();
+            format!("Current: {:?} - {:.1}s", scenario_type, remaining)
+        } else if scenario_state.current_index < scenario_state.scenarios.len() {
+            let next_scenario = scenario_state.scenarios[scenario_state.current_index];
+            let remaining = scenario_state.delay_timer.remaining_secs();
+            format!("Next: {:?} - {:.1}s", next_scenario, remaining)
+        } else {
+            "All scenarios completed!".to_string()
+        };
     }
 }
 
@@ -507,8 +450,8 @@ fn manage_scenarios(mut scenario_state: ResMut<ScenarioState>, time: Res<Time>,
             commands.entity(entity).despawn_recursive();
         }
 
-        // Start with delay before first scenario
         println!("Starting aim test sequence. First scenario in {} seconds...", SCENARIO_DELAY);
+        return;
     }
 
     // If test hasn't started, don't proceed
@@ -516,21 +459,20 @@ fn manage_scenarios(mut scenario_state: ResMut<ScenarioState>, time: Res<Time>,
         return;
     }
 
-    // Handle delay between scenarios
+    // Handle scenario state transitions
     if !scenario_state.is_active {
+        // In delay between scenarios
         scenario_state.delay_timer.tick(time.delta());
 
         if scenario_state.delay_timer.just_finished() {
-            // Start the next scenario
+            // Start next scenario if available
             if scenario_state.current_index < scenario_state.scenarios.len() {
                 let scenario_type = scenario_state.scenarios[scenario_state.current_index];
                 scenario_state.current_type = Some(scenario_type);
                 scenario_state.is_active = true;
                 scenario_state.scenario_timer.reset();
 
-                // Spawn targets for this scenario
                 spawn_scenario_targets(&mut commands, &mut meshes, &mut materials, scenario_type, &targets);
-
                 println!("Starting scenario: {:?}", scenario_type);
             } else {
                 // All scenarios completed
@@ -540,7 +482,7 @@ fn manage_scenarios(mut scenario_state: ResMut<ScenarioState>, time: Res<Time>,
             }
         }
     } else {
-        // Handle active scenario
+        // In active scenario
         scenario_state.scenario_timer.tick(time.delta());
 
         if scenario_state.scenario_timer.just_finished() {
@@ -557,32 +499,48 @@ fn manage_scenarios(mut scenario_state: ResMut<ScenarioState>, time: Res<Time>,
             if scenario_state.current_index < scenario_state.scenarios.len() {
                 println!("Scenario completed. Next scenario in {} seconds...", SCENARIO_DELAY);
             }
-        } else {
-            // Update targets based on current scenario
+        } else if let Some(scenario_type) = scenario_state.current_type {
+            // Update targets for current scenario
             update_scenario_targets(&mut commands, &mut meshes, &mut materials,
-                                   scenario_state.current_type.unwrap(), time.delta_secs(), &targets);
+                                   scenario_type, time.delta_secs(), &targets);
         }
     }
 }
 
-// Helper function to spawn targets in front of the player within FOV
+// Spawn a target at a random position within the player's field of view
 fn spawn_target_in_fov(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>,
                      materials: &mut ResMut<Assets<StandardMaterial>>,
-                     pattern: MovementPattern, max_speed: f32) -> Vec3 {
+                     pattern: Option<MovementPattern>, max_speed: Option<f32>) -> Vec3 {
     let mut rng = rand::rng();
 
-    // Target wall is always in front of player (negative Z)
-    let z = -ARENA_DEPTH/2.0 + 5.0; // 5 units from the wall
+    // If pattern not specified, choose a random one
+    let pattern = pattern.unwrap_or_else(|| {
+        let patterns = [MovementPattern::Static, MovementPattern::Linear,
+                       MovementPattern::Circular, MovementPattern::Random];
+        patterns[rng.random_range(0..patterns.len())]
+    });
 
-    // Calculate a position within the player's FOV
-    // For a 90-degree FOV, the width at distance |z| is approximately 2*|z|
-    let fov_width = 2.0 * z.abs();
-    let x = rng.sample(Uniform::new(-fov_width/2.0, fov_width/2.0).unwrap());
-    let y = rng.sample(Uniform::new(5.0, ARENA_HEIGHT - 5.0).unwrap()); // Keep targets at reasonable heights
+    // If max_speed not specified, choose a random one based on pattern
+    let max_speed = max_speed.unwrap_or_else(|| {
+        if pattern == MovementPattern::Static { 0.0 } else { rng.random_range(3.0..10.0) }
+    });
 
-    let pos = Vec3::new(x, y, z);
-    spawn_target_with_movement(commands, meshes, materials, pos, pattern, max_speed);
-    pos
+    // Generate random position within FOV
+    let z = -ARENA_DEPTH/2.0 + 5.0; // Near the front wall
+    let fov_width = 2.0 * z.abs(); // Width of FOV at this distance
+    let pos = Vec3::new(
+        rng.sample(Uniform::new(-fov_width/2.0, fov_width/2.0).unwrap()),
+        rng.sample(Uniform::new(5.0, ARENA_HEIGHT - 5.0).unwrap()),
+        z
+    );
+
+    spawn_target_with_movement(commands, meshes, materials, pos, pattern, max_speed)
+}
+
+// Shorthand for spawning a random target
+fn spawn_random_target(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>,
+                     materials: &mut ResMut<Assets<StandardMaterial>>) {
+    spawn_target_in_fov(commands, meshes, materials, None, None);
 }
 
 fn spawn_scenario_targets(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>,
@@ -593,91 +551,71 @@ fn spawn_scenario_targets(commands: &mut Commands, meshes: &mut ResMut<Assets<Me
         commands.entity(entity).despawn_recursive();
     }
 
+    // Common values
+    let z_wall = -ARENA_DEPTH/2.0 + 5.0; // 5 units from the wall
+
+    // Spawn targets based on scenario type
     match scenario_type {
         ScenarioType::StaticClicking => {
-            // Spawn 5 static targets in fixed positions within FOV
+            // Spawn 5 static targets in a circle
             for i in 0..5 {
                 let angle = (i as f32) * (TAU / 5.0);
-                let z = -ARENA_DEPTH/2.0 + 5.0; // 5 units from the wall
-                let radius = z.abs() * 0.8; // 80% of the distance to the wall
-
-                let pos = Vec3::new(
-                    radius * angle.cos(),
-                    10.0 + (i as f32 * 3.0) % 15.0, // Vary heights
-                    z
+                spawn_target_with_movement(
+                    commands, meshes, materials,
+                    Vec3::new(z_wall.abs() * 0.8 * angle.cos(), 10.0 + (i as f32 * 3.0) % 15.0, z_wall),
+                    MovementPattern::Static, 0.0
                 );
-                spawn_target_with_movement(commands, meshes, materials, pos, MovementPattern::Static, 0.0);
             }
         },
         ScenarioType::DynamicClicking => {
-            // Spawn exactly 3 moving targets with random movement
+            // Spawn 3 random moving targets
             for _ in 0..3 {
-                spawn_target_in_fov(commands, meshes, materials, MovementPattern::Random, 10.0);
+                spawn_target_in_fov(commands, meshes, materials, Some(MovementPattern::Random), Some(10.0));
             }
         },
         ScenarioType::LinearClicking => {
-            // Spawn 3 targets that move in straight lines
+            // Spawn 3 targets in a row that move linearly
             for i in 0..3 {
-                let z = -ARENA_DEPTH/2.0 + 5.0;
-                let pos = Vec3::new(
-                    (i as f32 - 1.0) * 15.0,
-                    10.0 + (i as f32 * 5.0),
-                    z
+                spawn_target_with_movement(
+                    commands, meshes, materials,
+                    Vec3::new((i as f32 - 1.0) * 15.0, 10.0 + (i as f32 * 5.0), z_wall),
+                    MovementPattern::Linear, 5.0
                 );
-                spawn_target_with_movement(commands, meshes, materials, pos, MovementPattern::Linear, 5.0);
             }
         },
+        // Single target tracking scenarios
         ScenarioType::PreciseTracking => {
-            // Spawn a single target that moves slowly and predictably
-            let z = -ARENA_DEPTH/2.0 + 10.0;
-            spawn_target_with_movement(commands, meshes, materials, Vec3::new(0.0, 15.0, z), MovementPattern::Circular, 3.0);
+            spawn_target_with_movement(commands, meshes, materials,
+                                      Vec3::new(0.0, 15.0, z_wall), MovementPattern::Circular, 3.0);
         },
         ScenarioType::ReactiveTracking => {
-            // Spawn a single target that moves with sudden direction changes
-            let z = -ARENA_DEPTH/2.0 + 10.0;
-            spawn_target_with_movement(commands, meshes, materials, Vec3::new(0.0, 15.0, z), MovementPattern::Reactive, 15.0);
+            spawn_target_with_movement(commands, meshes, materials,
+                                      Vec3::new(0.0, 15.0, z_wall), MovementPattern::Random, 15.0);
         },
         ScenarioType::ControlTracking => {
-            // Spawn a single target that moves in smooth patterns
-            let z = -ARENA_DEPTH/2.0 + 10.0;
-            spawn_target_with_movement(commands, meshes, materials, Vec3::new(0.0, 15.0, z), MovementPattern::Smooth, 8.0);
+            spawn_target_with_movement(commands, meshes, materials,
+                                      Vec3::new(0.0, 15.0, z_wall), MovementPattern::Circular, 8.0);
         },
-        ScenarioType::SpeedSwitching => {
-            // Spawn multiple targets that appear and disappear quickly
-            let z = -ARENA_DEPTH/2.0 + 5.0;
-            for i in 0..3 {
-                let pos = Vec3::new(
-                    (i as f32 - 1.0) * 20.0,
-                    10.0 + (i as f32 * 5.0),
-                    z
-                );
-                spawn_target_with_movement(commands, meshes, materials, pos, MovementPattern::Static, 0.0);
-            }
+        // Switching scenarios with multiple targets
+        ScenarioType::SpeedSwitching | ScenarioType::StabilitySwitching => {
+            spawn_multiple_targets(commands, meshes, materials, z_wall, MovementPattern::Static, 0.0);
         },
         ScenarioType::EvasiveSwitching => {
-            // Spawn targets that move away from the crosshair
-            let z = -ARENA_DEPTH/2.0 + 10.0;
-            for i in 0..3 {
-                let pos = Vec3::new(
-                    (i as f32 - 1.0) * 20.0,
-                    10.0 + (i as f32 * 5.0),
-                    z
-                );
-                spawn_target_with_movement(commands, meshes, materials, pos, MovementPattern::Evasive, 12.0);
-            }
+            spawn_multiple_targets(commands, meshes, materials, z_wall, MovementPattern::Random, 12.0);
         },
-        ScenarioType::StabilitySwitching => {
-            // Spawn targets that require precision between switches
-            let z = -ARENA_DEPTH/2.0 + 5.0;
-            for i in 0..3 {
-                let pos = Vec3::new(
-                    (i as f32 - 1.0) * 20.0,
-                    10.0 + (i as f32 * 5.0),
-                    z
-                );
-                spawn_target_with_movement(commands, meshes, materials, pos, MovementPattern::Static, 0.0);
-            }
-        },
+    }
+}
+
+// Helper function to spawn multiple targets in a row
+fn spawn_multiple_targets(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>,
+                        materials: &mut ResMut<Assets<StandardMaterial>>, z: f32,
+                        pattern: MovementPattern, speed: f32) {
+    for i in 0..3 {
+        spawn_target_with_movement(
+            commands, meshes, materials,
+            Vec3::new((i as f32 - 1.0) * 20.0, 10.0 + (i as f32 * 5.0), z),
+            pattern, speed
+        );
     }
 }
 
@@ -685,18 +623,12 @@ fn update_scenario_targets(commands: &mut Commands, meshes: &mut ResMut<Assets<M
                           materials: &mut ResMut<Assets<StandardMaterial>>,
                           scenario_type: ScenarioType, _delta_time: f32,
                           targets: &Query<Entity, With<Target>>) {
-    // This function would update target behavior based on the current scenario
-    // For now, we'll just implement basic functionality
-    match scenario_type {
-        ScenarioType::DynamicClicking => {
-            // Only spawn new targets if we have fewer than the maximum
-            let target_count = targets.iter().count();
-            if target_count < 3 && rand::random::<f32>() < 0.1 {
-                // Use the helper function to spawn within FOV
-                spawn_target_in_fov(commands, meshes, materials, MovementPattern::Random, 10.0);
-            }
-        },
-        _ => {}
+    // Only spawn new targets for DynamicClicking if we have fewer than 3
+    if scenario_type == ScenarioType::DynamicClicking {
+        let target_count = targets.iter().count();
+        if target_count < 3 && rand::random::<f32>() < 0.1 {
+            spawn_target_in_fov(commands, meshes, materials, Some(MovementPattern::Random), Some(10.0));
+        }
     }
 }
 
@@ -705,260 +637,137 @@ fn update_target_movements(time: Res<Time>, mut query: Query<(&mut Transform, &m
     let delta = time.delta_secs();
     let camera_transform = camera_query.get_single().ok();
 
+    // Common boundary values
+    let margin = 5.0;
+    let z_min = -ARENA_DEPTH/2.0 + margin;
+    let z_max = z_min + 30.0;
+
     for (mut transform, mut movement) in &mut query {
         movement.timer += delta;
 
+        // Calculate FOV-based boundaries
+        let fov_width = 2.0 * transform.translation.z.abs();
+        let bounds_min = Vec3::new(-fov_width/2.0, 5.0, z_min);
+        let bounds_max = Vec3::new(fov_width/2.0, ARENA_HEIGHT - 5.0, z_max);
+
+        // Update position based on pattern
         match movement.pattern {
-            MovementPattern::Static => {
-                // No movement
-            },
+            MovementPattern::Static => {}, // No movement
+
             MovementPattern::Linear => {
-                // Move in a straight line, bounce off invisible boundaries
+                // Initialize velocity if needed
                 if movement.velocity.length_squared() < 0.001 {
-                    // Initialize velocity if not set
-                    let mut rng = rand::rng();
-                    movement.velocity = Vec3::new(
-                        rng.sample(Uniform::new(-1.0, 1.0).unwrap()),
-                        0.0,
-                        rng.sample(Uniform::new(-1.0, 1.0).unwrap())
-                    ).normalize() * movement.max_speed;
+                    initialize_velocity(&mut movement, 0.0);
                 }
 
-                // Update position
-                transform.translation += movement.velocity * delta;
-
-                // Keep targets within the front wall area (player's FOV)
-                let margin = 5.0;
-                let z_min = -ARENA_DEPTH/2.0 + margin;
-                let z_max = z_min + 30.0; // Only allow targets to move within 30 units of the front wall
-
-                // Calculate FOV width at the target's z position
-                let fov_width = 2.0 * transform.translation.z.abs();
-                let bounds_min = Vec3::new(-fov_width/2.0, 5.0, z_min);
-                let bounds_max = Vec3::new(fov_width/2.0, ARENA_HEIGHT - 5.0, z_max);
-
-                if transform.translation.x < bounds_min.x || transform.translation.x > bounds_max.x {
-                    movement.velocity.x = -movement.velocity.x;
-                }
-                if transform.translation.y < bounds_min.y || transform.translation.y > bounds_max.y {
-                    movement.velocity.y = -movement.velocity.y;
-                }
-                if transform.translation.z < bounds_min.z || transform.translation.z > bounds_max.z {
-                    movement.velocity.z = -movement.velocity.z;
-                }
-
-                // Clamp position to boundaries
-                transform.translation = transform.translation.clamp(bounds_min, bounds_max);
+                apply_velocity(&mut transform, &movement, delta);
+                handle_boundary_collision(&mut transform, &mut movement, bounds_min, bounds_max);
             },
-            MovementPattern::Circular => {
-                // Move in a circular pattern, but keep it in front of the player
-                let radius = 15.0;
-                let speed = movement.max_speed / radius; // Angular velocity
-                let angle = movement.timer * speed;
 
-                // Calculate position in a horizontal circle
-                let z_base = -ARENA_DEPTH/2.0 + 15.0; // Keep it near the front wall
+            MovementPattern::Circular => {
+                // Circular pattern
+                let radius = 15.0;
+                let angle = movement.timer * (movement.max_speed / radius);
+
                 transform.translation = Vec3::new(
                     movement.start_position.x + radius * angle.cos(),
-                    movement.start_position.y + radius * 0.3 * angle.sin(), // Small vertical movement
-                    z_base + radius * 0.2 * (1.0 - angle.cos()) // Small z variation, but stay near the wall
+                    movement.start_position.y + radius * 0.3 * angle.sin(),
+                    -ARENA_DEPTH/2.0 + 15.0 + radius * 0.2 * (1.0 - angle.cos())
                 );
 
-                // Ensure it stays within FOV
-                let fov_width = 2.0 * transform.translation.z.abs();
-                let bounds_min = Vec3::new(-fov_width/2.0, 5.0, -ARENA_DEPTH/2.0 + 5.0);
-                let bounds_max = Vec3::new(fov_width/2.0, ARENA_HEIGHT - 5.0, -ARENA_DEPTH/2.0 + 35.0);
                 transform.translation = transform.translation.clamp(bounds_min, bounds_max);
             },
+
             MovementPattern::Random => {
-                // Random movement with occasional direction changes
+                // Change direction occasionally
                 if movement.velocity.length_squared() < 0.001 || movement.timer > 2.0 {
-                    // Initialize or change velocity
-                    let mut rng = rand::rng();
-                    movement.velocity = Vec3::new(
-                        rng.sample(Uniform::new(-1.0, 1.0).unwrap()),
-                        rng.sample(Uniform::new(-0.2, 0.2).unwrap()),
-                        rng.sample(Uniform::new(-1.0, 1.0).unwrap())
-                    ).normalize() * movement.max_speed;
+                    initialize_velocity(&mut movement, 0.2);
                     movement.timer = 0.0;
                 }
 
-                // Update position
-                transform.translation += movement.velocity * delta;
+                apply_velocity(&mut transform, &movement, delta);
+                handle_boundary_collision(&mut transform, &mut movement, bounds_min, bounds_max);
 
-                // Keep targets within the front wall area (player's FOV)
-                let margin = 5.0;
-                let z_min = -ARENA_DEPTH/2.0 + margin;
-                let z_max = z_min + 30.0; // Only allow targets to move within 30 units of the front wall
-
-                // Calculate FOV width at the target's z position
-                let fov_width = 2.0 * transform.translation.z.abs();
-                let bounds_min = Vec3::new(-fov_width/2.0, 5.0, z_min);
-                let bounds_max = Vec3::new(fov_width/2.0, ARENA_HEIGHT - 5.0, z_max);
-
-                if transform.translation.x < bounds_min.x || transform.translation.x > bounds_max.x {
-                    movement.velocity.x = -movement.velocity.x;
-                }
-                if transform.translation.y < bounds_min.y || transform.translation.y > bounds_max.y {
-                    movement.velocity.y = -movement.velocity.y;
-                }
-                if transform.translation.z < bounds_min.z || transform.translation.z > bounds_max.z {
-                    movement.velocity.z = -movement.velocity.z;
-                }
-
-                // Clamp position to boundaries
-                transform.translation = transform.translation.clamp(bounds_min, bounds_max);
-            },
-            MovementPattern::Reactive => {
-                // Sudden, unpredictable movements
-                if movement.timer > 0.5 {
-                    // Change direction abruptly
-                    let mut rng = rand::rng();
-                    movement.velocity = Vec3::new(
-                        rng.sample(Uniform::new(-1.0, 1.0).unwrap()),
-                        rng.sample(Uniform::new(-0.3, 0.3).unwrap()),
-                        rng.sample(Uniform::new(-1.0, 1.0).unwrap())
-                    ).normalize() * movement.max_speed;
-                    movement.timer = 0.0;
-                }
-
-                // Update position
-                transform.translation += movement.velocity * delta;
-
-                // Keep targets within the front wall area (player's FOV)
-                let margin = 5.0;
-                let z_min = -ARENA_DEPTH/2.0 + margin;
-                let z_max = z_min + 30.0; // Only allow targets to move within 30 units of the front wall
-
-                // Calculate FOV width at the target's z position
-                let fov_width = 2.0 * transform.translation.z.abs();
-                let bounds_min = Vec3::new(-fov_width/2.0, 5.0, z_min);
-                let bounds_max = Vec3::new(fov_width/2.0, ARENA_HEIGHT - 5.0, z_max);
-
-                if transform.translation.x < bounds_min.x || transform.translation.x > bounds_max.x {
-                    movement.velocity.x = -movement.velocity.x;
-                }
-                if transform.translation.y < bounds_min.y || transform.translation.y > bounds_max.y {
-                    movement.velocity.y = -movement.velocity.y;
-                }
-                if transform.translation.z < bounds_min.z || transform.translation.z > bounds_max.z {
-                    movement.velocity.z = -movement.velocity.z;
-                }
-
-                // Clamp position to boundaries
-                transform.translation = transform.translation.clamp(bounds_min, bounds_max);
-            },
-            MovementPattern::Smooth => {
-                // Smooth, predictable movement patterns
-                let time = movement.timer;
-                let radius_x = 15.0;
-                let radius_y = 8.0;
-
-                // Figure-8 pattern in the X-Y plane (horizontal figure-8)
-                let z_base = -ARENA_DEPTH/2.0 + 15.0; // Keep it near the front wall
-                transform.translation = Vec3::new(
-                    movement.start_position.x + radius_x * (2.0 * time).sin(),
-                    movement.start_position.y + radius_y * (time).sin() * (time).cos(),
-                    z_base // Keep z position fixed near the wall
-                );
-
-                // Ensure it stays within FOV
-                let fov_width = 2.0 * transform.translation.z.abs();
-                let bounds_min = Vec3::new(-fov_width/2.0, 5.0, -ARENA_DEPTH/2.0 + 5.0);
-                let bounds_max = Vec3::new(fov_width/2.0, ARENA_HEIGHT - 5.0, -ARENA_DEPTH/2.0 + 35.0);
-                transform.translation = transform.translation.clamp(bounds_min, bounds_max);
-            },
-            MovementPattern::Evasive => {
-                // Try to evade the player's aim
+                // Add evasion for high-speed targets
                 if let Some(camera) = camera_transform {
-                    // Calculate direction from target to camera
-                    let to_camera = (camera.translation - transform.translation).normalize();
-
-                    // Move perpendicular to this direction
-                    let perpendicular = Vec3::new(to_camera.z, 0.0, -to_camera.x).normalize() * movement.max_speed;
-
-                    // Update position
-                    transform.translation += perpendicular * delta;
-
-                    // Keep targets within the front wall area (player's FOV)
-                    let margin = 5.0;
-                    let z_min = -ARENA_DEPTH/2.0 + margin;
-                    let z_max = z_min + 30.0; // Only allow targets to move within 30 units of the front wall
-
-                    // Calculate FOV width at the target's z position
-                    let fov_width = 2.0 * transform.translation.z.abs();
-                    let bounds_min = Vec3::new(-fov_width/2.0, 5.0, z_min);
-                    let bounds_max = Vec3::new(fov_width/2.0, ARENA_HEIGHT - 5.0, z_max);
-
-                    // Clamp position to boundaries
-                    transform.translation = transform.translation.clamp(bounds_min, bounds_max);
+                    if movement.max_speed > 10.0 {
+                        let to_camera = (camera.translation - transform.translation).normalize();
+                        let perpendicular = Vec3::new(to_camera.z, 0.0, -to_camera.x).normalize() * delta * 5.0;
+                        transform.translation += perpendicular;
+                        transform.translation = transform.translation.clamp(bounds_min, bounds_max);
+                    }
                 }
             },
         }
     }
 }
 
+// Helper to initialize velocity
+fn initialize_velocity(movement: &mut TargetMovement, y_range: f32) {
+    let mut rng = rand::rng();
+    let y_component = if y_range > 0.0 {
+        rng.sample(Uniform::new(-y_range, y_range).unwrap())
+    } else {
+        0.0 // No vertical movement if y_range is 0
+    };
 
+    movement.velocity = Vec3::new(
+        rng.sample(Uniform::new(-1.0, 1.0).unwrap()),
+        y_component,
+        rng.sample(Uniform::new(-1.0, 1.0).unwrap())
+    ).normalize() * movement.max_speed;
+}
+
+// Helper to apply velocity
+fn apply_velocity(transform: &mut Transform, movement: &TargetMovement, delta: f32) {
+    transform.translation += movement.velocity * delta;
+}
+
+// Handle boundary collisions with a single function
+fn handle_boundary_collision(transform: &mut Transform, movement: &mut TargetMovement,
+                           bounds_min: Vec3, bounds_max: Vec3) {
+    // Check each axis and bounce if needed
+    for i in 0..3 {
+        if transform.translation[i] < bounds_min[i] || transform.translation[i] > bounds_max[i] {
+            movement.velocity[i] = -movement.velocity[i];
+        }
+    }
+
+    // Clamp position to boundaries
+    transform.translation = transform.translation.clamp(bounds_min, bounds_max);
+}
 
 fn spawn_target_with_movement(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>,
                             materials: &mut ResMut<Assets<StandardMaterial>>, position: Vec3,
-                            pattern: MovementPattern, max_speed: f32) {
-    // Create target material
-    let target_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.1, 0.1),
-        emissive: Color::srgb(1.0, 0.2, 0.2).into(),
-        perceptual_roughness: 0.0, metallic: 0.5, reflectance: 1.0,
-        ..default()
-    });
-
-    // Create movement component if not static
-    let components = (
+                            pattern: MovementPattern, max_speed: f32) -> Vec3 {
+    // Create red glowing target
+    let mut entity = commands.spawn((
         Collider::ball(TARGET_SIZE),
         RigidBody::Dynamic,
-        GravityScale(0.0), // Disable gravity
+        GravityScale(0.0),
         Sleeping::disabled(),
         Transform::from_translation(position),
         Target,
         Mesh3d(meshes.add(Sphere::new(TARGET_SIZE))),
-        MeshMaterial3d(target_material),
-    );
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.1, 0.1),
+            emissive: Color::srgb(1.0, 0.2, 0.2).into(),
+            perceptual_roughness: 0.0, metallic: 0.5, reflectance: 1.0,
+            ..default()
+        })),
+    ));
 
     // Add movement component if not static
     if pattern != MovementPattern::Static {
-        let movement = TargetMovement {
+        entity.insert(TargetMovement {
             velocity: Vec3::ZERO,
             pattern,
             timer: 0.0,
             start_position: position,
             max_speed,
-        };
-        commands.spawn(components).insert(movement);
-    } else {
-        commands.spawn(components);
+        });
     }
-}
 
-fn update_scenario_display(scenario_state: Res<ScenarioState>, mut query: Query<&mut Text, With<ScenarioDisplay>>) {
-    if let Ok(mut text) = query.get_single_mut() {
-        if scenario_state.has_started {
-            if scenario_state.is_active {
-                let scenario_type = scenario_state.current_type.unwrap();
-                let remaining = scenario_state.scenario_timer.remaining_secs();
-                text.0 = format!("Current: {:?} - {:.1}s", scenario_type, remaining);
-            } else {
-                let next_index = scenario_state.current_index;
-                if next_index < scenario_state.scenarios.len() {
-                    let next_scenario = scenario_state.scenarios[next_index];
-                    let remaining = scenario_state.delay_timer.remaining_secs();
-                    text.0 = format!("Next: {:?} - {:.1}s", next_scenario, remaining);
-                } else {
-                    text.0 = "All scenarios completed!".to_string();
-                }
-            }
-        } else {
-            text.0 = "Press SPACE to start scenarios".to_string();
-        }
-    }
+    position
 }
-
 
