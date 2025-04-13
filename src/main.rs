@@ -33,10 +33,7 @@ struct ShootTracker {
     spray_count: usize,
 }
 
-#[derive(Component)]
-struct BulletImpact {
-    stopwatch: Stopwatch,
-}
+// Removed BulletImpact component as it's no longer needed
 
 fn main() {
     App::new()
@@ -62,7 +59,7 @@ fn main() {
                 manage_cursor,
                 click_targets,
                 update_points_display,
-                despawn_bullet_impacts,
+                // Removed despawn_bullet_impacts system as it's no longer needed
             ),
         ) // Add update_points_display system
         .run();
@@ -321,20 +318,8 @@ fn click_targets(
             {
                 let hit_point = ray_pos + ray_dir * Vec3::splat(toi.into());
                 println!("Hit entity {:?} at {:?}", entity, hit_point);
-                commands.spawn((
-                    BulletImpact {
-                        stopwatch: Stopwatch::new(),
-                    },
-                    Transform::from_translation(hit_point),
-                    Mesh3d(meshes.add(Sphere::new(0.1))),
-                    MeshMaterial3d(materials.add(StandardMaterial {
-                        base_color: Color::srgb(0.0, 1.0, 1.0), // Cyan impact effect
-                        ..Default::default()
-                    })),
-                ));
 
-                // No impact sound effect for now
-                // We removed the gun impact sound and would need a proper impact sound file
+                // Removed bullet impact sphere spawning code
 
                 // Handle the hit.
                 if let Ok(target_entity) = targets.get(entity) {
@@ -401,15 +386,4 @@ fn update_points_display(points: Res<Points>, mut query: Query<&mut Text, With<P
     }
 }
 
-fn despawn_bullet_impacts(
-    mut commands: Commands,
-    mut bullet_impacts: Query<(Entity, &mut BulletImpact)>,
-    time: Res<Time>,
-) {
-    for (entity, mut impact) in &mut bullet_impacts.iter_mut() {
-        impact.stopwatch.tick(time.delta());
-        if impact.stopwatch.elapsed_secs() > 0.1 {
-            commands.entity(entity).despawn_recursive();
-        }
-    }
-}
+// Removed despawn_bullet_impacts function as it's no longer needed
