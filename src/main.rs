@@ -39,7 +39,7 @@ struct FpsDisplay;
 struct Points { pub value: i32 }
 
 #[derive(Component)]
-struct ShootTracker { stopwatch: Stopwatch, spray_count: usize }
+struct ShootTracker { stopwatch: Stopwatch }
 
 fn main() {
     App::new()
@@ -95,7 +95,7 @@ fn spawn_player(commands: &mut Commands) -> Entity {
             },
         ))
         .insert(CameraConfig { height_offset: CAMERA_HEIGHT_OFFSET })
-        .insert(ShootTracker { stopwatch: Stopwatch::new(), spray_count: 0 })
+        .insert(ShootTracker { stopwatch: Stopwatch::new() })
         .insert(SpatialListener::new(0.5))
         .id()
 }
@@ -290,12 +290,7 @@ fn set_cursor_state(window: &mut Window, controller: &mut FpsController, gamepla
     controller.enable_input = gameplay_active;
 }
 
-const SPRAY_DIRECTIONS: [Vec3; 12] = [
-    Vec3::ZERO, Vec3::new(-0.01, 0.025, 0.0), Vec3::new(-0.02, 0.05, 0.0), Vec3::new(-0.03, 0.055, 0.0),
-    Vec3::new(-0.032, 0.065, 0.0), Vec3::new(-0.034, 0.075, 0.0), Vec3::new(-0.038, 0.08, 0.0),
-    Vec3::new(-0.042, 0.082, 0.0), Vec3::new(-0.046, 0.085, 0.0), Vec3::new(-0.042, 0.087, 0.0),
-    Vec3::new(-0.039, 0.090, 0.0), Vec3::new(-0.038, 0.093, 0.0),
-];
+
 
 fn click_targets(
     mut commands: Commands,
@@ -316,18 +311,15 @@ fn click_targets(
     shoot_tracker.stopwatch.tick(time.delta());
 
     // Early returns
-    if !buttons.pressed(MouseButton::Left) { shoot_tracker.spray_count = 0; return; }
+    if !buttons.pressed(MouseButton::Left) { return; }
     if shoot_tracker.stopwatch.elapsed_secs() <= 0.1 { return; }
 
     // Get camera transform once
     let camera_transform = camera.single();
 
-    // Calculate spray direction
-    let spray = get_spray_direction(&mut shoot_tracker);
-
     // Cast ray and handle hit
     let ray_pos = camera_transform.translation;
-    let ray_dir = camera_transform.forward().as_vec3() + camera_transform.rotation * spray;
+    let ray_dir = camera_transform.forward().as_vec3();
     let filter = QueryFilter::new().exclude_sensors().exclude_rigid_body(player_handle);
 
     // Process hit result
@@ -339,17 +331,7 @@ fn click_targets(
     shoot_tracker.stopwatch.reset();
 }
 
-fn get_spray_direction(shoot_tracker: &mut ShootTracker) -> Vec3 {
-    let spray = if shoot_tracker.spray_count >= SPRAY_DIRECTIONS.len() {
-        let mut rng = rand::rng();
-        Vec3::new(rng.sample(Uniform::new(-0.065f32, 0.065).unwrap()),
-                 rng.sample(Uniform::new(-0.065f32, 0.065).unwrap()), 0.0)
-    } else {
-        SPRAY_DIRECTIONS[shoot_tracker.spray_count]
-    };
-    shoot_tracker.spray_count += 1;
-    spray
-}
+
 
 fn process_hit_result(
     hit_result: Option<(Entity, f32)>,
