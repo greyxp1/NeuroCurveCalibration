@@ -8,12 +8,12 @@ use std::f32::consts::TAU;
 const SENSITIVITY_CM_PER_360: f32 = 10.0;
 const MOUSE_DPI: f32 = 1600.0;
 const SPAWN_POINT: Vec3 = Vec3::new(0.0, 1.625, 0.0);
-const ARENA_WIDTH: f32 = 100.0;
-const ARENA_DEPTH: f32 = 100.0;
+const ARENA_WIDTH: f32 = 200.0;
+const ARENA_DEPTH: f32 = 200.0;
 const ARENA_HEIGHT: f32 = 50.0;
 const WALL_THICKNESS: f32 = 1.0;
-const TARGET_ARENA_WIDTH: f32 = 95.0;
-const TARGET_ARENA_DEPTH: f32 = 95.0;
+const TARGET_ARENA_WIDTH: f32 = 195.0;
+const TARGET_ARENA_DEPTH: f32 = 195.0;
 const TARGET_ARENA_HEIGHT: f32 = 40.0;
 const TARGET_SIZE: f32 = 1.5;
 const WALL_BIAS: f32 = 0.95;
@@ -211,14 +211,26 @@ fn setup_arena(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, mater
     // Grid lines
     let line_thickness = 0.2;
     let line_height = 0.05;
-    for i in (-48..=48).step_by(4) {
-        let x = i as f32;
+    let grid_spacing = 4.0;
+
+    // Calculate grid range based on arena dimensions
+    let half_width = ARENA_WIDTH / 2.0;
+    let half_depth = ARENA_DEPTH / 2.0;
+
+    // Create grid lines along X axis (width)
+    for x in (-half_width as i32..=half_width as i32).step_by(grid_spacing as usize) {
+        let x_pos = x as f32;
         commands.spawn((Mesh3d(meshes.add(Cuboid::new(line_thickness, line_height, ARENA_DEPTH))),
                        MeshMaterial3d(materials.grid.clone()),
-                       Transform::from_translation(Vec3::new(x, -0.45, 0.0))));
+                       Transform::from_translation(Vec3::new(x_pos, -0.45, 0.0))));
+    }
+
+    // Create grid lines along Z axis (depth)
+    for z in (-half_depth as i32..=half_depth as i32).step_by(grid_spacing as usize) {
+        let z_pos = z as f32;
         commands.spawn((Mesh3d(meshes.add(Cuboid::new(ARENA_WIDTH, line_height, line_thickness))),
                        MeshMaterial3d(materials.grid.clone()),
-                       Transform::from_translation(Vec3::new(0.0, -0.45, x))));
+                       Transform::from_translation(Vec3::new(0.0, -0.45, z_pos))));
     }
 
     // Walls and ceiling
@@ -322,9 +334,12 @@ fn click_targets(
     let ray_dir = camera_transform.forward().as_vec3();
     let filter = QueryFilter::new().exclude_sensors().exclude_rigid_body(player_handle);
 
-    // Process hit result
+    // Calculate maximum possible distance in the arena (diagonal + some margin)
+    let max_distance = (ARENA_WIDTH.powi(2) + ARENA_DEPTH.powi(2) + ARENA_HEIGHT.powi(2)).sqrt() * 1.5;
+
+    // Process hit result with increased ray distance
     process_hit_result(
-        rapier_context.single().cast_ray(ray_pos, ray_dir, 100.0, true, filter),
+        rapier_context.single().cast_ray(ray_pos, ray_dir, max_distance, true, filter),
         &mut commands, &mut meshes, &mut materials, &targets, &mut points
     );
 
