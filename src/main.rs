@@ -8,7 +8,7 @@ use std::f32::consts::TAU;
 const SPAWN_POINT: Vec3 = Vec3::new(0.0, 1.625, 0.0);
 const ARENA_WIDTH: f32 = 100.0;
 const ARENA_DEPTH: f32 = 100.0;
-const ARENA_HEIGHT: f32 = 25.0;
+const ARENA_HEIGHT: f32 = 50.0;
 const WALL_THICKNESS: f32 = 1.0;
 const TARGET_ARENA_WIDTH: f32 = 95.0;
 const TARGET_ARENA_DEPTH: f32 = 95.0;
@@ -40,7 +40,16 @@ fn main() {
         .insert_resource(AmbientLight { color: Color::WHITE, brightness: 2000.0 })
         .insert_resource(ClearColor(Color::srgb(0.1, 0.1, 0.15)))
         .insert_resource(Points::default())
-        .add_plugins((DefaultPlugins, FrameTimeDiagnosticsPlugin::default(),
+        // Configure window settings with vsync disabled for maximum performance
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: String::from("Kovaak's-Inspired Aim Trainer"),
+                present_mode: bevy::window::PresentMode::Immediate, // Disable vsync
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_plugins((FrameTimeDiagnosticsPlugin::default(),
                      RapierPhysicsPlugin::<NoUserData>::default(), FpsControllerPlugin))
         .add_systems(Startup, (setup, fps_controller_setup.in_set(FpsControllerSetup)))
         .add_systems(Update, (respawn, manage_cursor, click_targets,
@@ -92,12 +101,10 @@ fn spawn_camera(commands: &mut Commands, logical_entity: Entity) {
 
 fn setup(
     mut commands: Commands,
-    mut window: Query<&mut Window>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut materials2d: ResMut<Assets<ColorMaterial>>,
 ) {
-    window.single_mut().title = String::from("Kovaak's-Inspired Aim Trainer");
 
     // Lighting setup
     setup_lighting(&mut commands);
@@ -145,6 +152,7 @@ struct MaterialHandles {
     ground: Handle<StandardMaterial>,
     wall: Handle<StandardMaterial>,
     grid: Handle<StandardMaterial>,
+    center_floor: Handle<StandardMaterial>,
 }
 
 fn setup_materials(materials: &mut ResMut<Assets<StandardMaterial>>) -> MaterialHandles {
@@ -159,16 +167,35 @@ fn setup_materials(materials: &mut ResMut<Assets<StandardMaterial>>) -> Material
             base_color: Color::srgb(0.3, 0.3, 0.35), emissive: Color::srgb(0.3, 0.3, 0.35).into(),
             unlit: true, ..default()
         }),
+        center_floor: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.0, 0.0), // Pure bright red
+            emissive: Color::srgb(0.5, 0.0, 0.0).into(), // Add glow effect
+            perceptual_roughness: 0.3, // More shiny
+            metallic: 0.2,
+            reflectance: 0.5, // More reflective
+            cull_mode: None,
+            ..default()
+        }),
     }
 }
 
+// Define the size of the red center area - 4 grid squares (each grid square is 4 units)
+const CENTER_SIZE: f32 = 8.0;
+
 fn setup_arena(commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &MaterialHandles) {
-    // Ground
+    // Main ground collider (covers the entire floor)
     commands.spawn((Collider::cuboid(ARENA_WIDTH/2.0, 0.1, ARENA_DEPTH/2.0), RigidBody::Fixed,
                    Transform::from_translation(Vec3::new(0.0, -0.5, 0.0))));
+
+    // Outer ground (dark gray)
     commands.spawn((Mesh3d(meshes.add(Cuboid::new(ARENA_WIDTH, 0.1, ARENA_DEPTH))),
                    MeshMaterial3d(materials.ground.clone()),
                    Transform::from_translation(Vec3::new(0.0, -0.5, 0.0))));
+
+    // Center floor (red) - positioned slightly above the main floor to be more visible
+    commands.spawn((Mesh3d(meshes.add(Cuboid::new(CENTER_SIZE, 0.1, CENTER_SIZE))),
+                   MeshMaterial3d(materials.center_floor.clone()),
+                   Transform::from_translation(Vec3::new(0.0, -0.44, 0.0))));
 
     // Grid lines
     let line_thickness = 0.2;
