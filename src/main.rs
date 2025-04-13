@@ -28,8 +28,8 @@ struct ShootTracker { stopwatch: Stopwatch, spray_count: usize }
 
 fn main() {
     App::new()
-        .insert_resource(AmbientLight { color: Color::WHITE, brightness: 6000.0 })
-        .insert_resource(ClearColor(Color::srgb(0.83, 0.96, 0.96)))
+        .insert_resource(AmbientLight { color: Color::WHITE, brightness: 2000.0 })
+        .insert_resource(ClearColor(Color::srgb(0.1, 0.1, 0.15)))
         .insert_resource(Points::default())
         .add_plugins(DefaultPlugins)
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
@@ -79,44 +79,113 @@ fn setup(
     mut materials2d: ResMut<Assets<ColorMaterial>>,
 ) {
     // Set window title
-    window.single_mut().title = String::from("Minimal FPS Controller Example");
+    window.single_mut().title = String::from("Kovaak's-Inspired Aim Trainer");
 
-    // Lighting and cameras
-    commands.spawn((DirectionalLight { illuminance: light_consts::lux::FULL_DAYLIGHT, shadows_enabled: true, ..default() },
-                   Transform::from_xyz(4.0, 14.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y)));
+    // Lighting setup - consolidated
+    // Main directional light
+    commands.spawn((DirectionalLight { illuminance: light_consts::lux::OVERCAST_DAY, shadows_enabled: true, ..default() },
+                   Transform::from_xyz(0.0, 20.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z)));
+
+    // Center fill light
+    commands.spawn((PointLight { color: Color::srgb(0.9, 0.9, 1.0), intensity: 3000.0, range: 50.0, ..default() },
+                   Transform::from_xyz(0.0, 10.0, 0.0)));
+
+    // Corner fill lights - using a loop to reduce code
+    let corner_positions = [(-10.0, -10.0), (10.0, -10.0), (-10.0, 10.0), (10.0, 10.0)];
+    for (x, z) in corner_positions.iter() {
+        commands.spawn((PointLight { color: Color::srgb(0.8, 0.8, 1.0), intensity: 1000.0, range: 30.0, ..default() },
+                       Transform::from_xyz(*x, 8.0, *z)));
+    }
     commands.spawn((Camera2d, Camera { order: 2, ..default() }));
 
-    // Ground and wall
-    let ground_material = materials.add(StandardMaterial { base_color: Color::srgb(0.5, 0.5, 0.5), ..Default::default() });
+    // Arena setup with materials and dimensions
+    let arena_width = 30.0;
+    let arena_depth = 30.0;
+    let arena_height = 10.0;
+    let wall_thickness = 0.5;
+
+    // Materials
+    let ground_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.15, 0.15, 0.15), perceptual_roughness: 0.9, cull_mode: None, ..default()
+    });
+
+    let wall_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 0.2, 0.25), perceptual_roughness: 0.8, cull_mode: None, ..default()
+    });
+
+    let grid_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.3, 0.3, 0.35), emissive: Color::srgb(0.3, 0.3, 0.35).into(),
+        unlit: true, ..default()
+    });
 
     // Ground
-    commands.spawn((Collider::cuboid(20.0, 0.1, 20.0), RigidBody::Fixed,
+    commands.spawn((Collider::cuboid(arena_width/2.0, 0.1, arena_depth/2.0), RigidBody::Fixed,
                    Transform::from_translation(Vec3::new(0.0, -0.5, 0.0))));
-    commands.spawn((Mesh3d(meshes.add(Cuboid::new(40.0, 0.1, 40.0))), MeshMaterial3d(ground_material.clone()),
+    commands.spawn((Mesh3d(meshes.add(Cuboid::new(arena_width, 0.1, arena_depth))),
+                   MeshMaterial3d(ground_material.clone()),
                    Transform::from_translation(Vec3::new(0.0, -0.5, 0.0))));
 
-    // Wall
-    commands.spawn((Collider::cuboid(5.0, 2.5, 0.5), RigidBody::Fixed,
-                   Transform::from_translation(Vec3::new(0.0, 0.0, 10.0))));
-    commands.spawn((Mesh3d(meshes.add(Cuboid::new(10.0, 5.0, 1.0))), MeshMaterial3d(ground_material),
-                   Transform::from_translation(Vec3::new(0.0, 0.0, 10.0))));
+    // Grid lines
+    let line_thickness = 0.05;
+    let line_height = 0.01;
+
+    // Create grid lines using loops
+    for i in (-14..=14).step_by(2) {
+        let x = i as f32;
+        // X axis lines
+        commands.spawn((Mesh3d(meshes.add(Cuboid::new(line_thickness, line_height, arena_depth))),
+                       MeshMaterial3d(grid_material.clone()),
+                       Transform::from_translation(Vec3::new(x, -0.45, 0.0))));
+
+        // Z axis lines
+        commands.spawn((Mesh3d(meshes.add(Cuboid::new(arena_width, line_height, line_thickness))),
+                       MeshMaterial3d(grid_material.clone()),
+                       Transform::from_translation(Vec3::new(0.0, -0.45, x))));
+    }
+
+    // Walls and ceiling - using a loop to reduce code
+    let wall_configs = [
+        // [width, height, depth, x, y, z] for each wall
+        [arena_width, arena_height, wall_thickness, 0.0, arena_height/2.0 - 0.5, arena_depth/2.0],   // Back
+        [arena_width, arena_height, wall_thickness, 0.0, arena_height/2.0 - 0.5, -arena_depth/2.0],  // Front
+        [wall_thickness, arena_height, arena_depth, -arena_width/2.0, arena_height/2.0 - 0.5, 0.0],  // Left
+        [wall_thickness, arena_height, arena_depth, arena_width/2.0, arena_height/2.0 - 0.5, 0.0],   // Right
+        [arena_width, wall_thickness, arena_depth, 0.0, arena_height - 0.5, 0.0]                     // Ceiling
+    ];
+
+    for [width, height, depth, x, y, z] in wall_configs {
+        // Physics collider
+        commands.spawn((Collider::cuboid(width/2.0, height/2.0, depth/2.0), RigidBody::Fixed,
+                       Transform::from_translation(Vec3::new(x, y, z))));
+        // Visual mesh
+        commands.spawn((Mesh3d(meshes.add(Cuboid::new(width, height, depth))),
+                       MeshMaterial3d(wall_material.clone()),
+                       Transform::from_translation(Vec3::new(x, y, z))));
+    }
 
     // Spawn targets
     for _ in 0..3 {
         spawn_random_target(&mut commands, &mut meshes, &mut materials);
     }
 
-    // UI elements
-    commands.spawn((Mesh2d(meshes.add(Circle::new(2.0))), // Crosshair
-                   MeshMaterial2d(materials2d.add(Color::srgb(0.5, 0.7, 1.0))),
-                   Transform::default()));
+    // UI elements - crosshair and displays
+    let crosshair_color = Color::srgb(0.0, 1.0, 1.0);
+    let crosshair_material = materials2d.add(crosshair_color);
 
-    // Points display
+    // Crosshair (horizontal and vertical lines)
+    for (width, height) in [(10.0, 2.0), (2.0, 10.0)] {
+        commands.spawn((
+            Mesh2d(meshes.add(Cuboid::new(width, height, 0.0))),
+            MeshMaterial2d(crosshair_material.clone()),
+            Transform::default(),
+        ));
+    }
+
+    // Text displays
     commands.spawn((Text::new("Points: 0"),
                    Node { position_type: PositionType::Absolute, bottom: Val::Px(5.), left: Val::Px(15.), ..default() },
                    PointsDisplay));
 
-    // FPS counter
     commands.spawn((Text::new("FPS: 0"),
                    Node { position_type: PositionType::Absolute, top: Val::Px(5.), right: Val::Px(15.), ..default() },
                    FpsDisplay));
@@ -137,24 +206,27 @@ fn manage_cursor(
     mut window_query: Query<&mut Window>,
     mut controller_query: Query<&mut FpsController>,
 ) {
-    if let Ok(mut window) = window_query.get_single_mut() {
-        if btn.just_pressed(MouseButton::Left) {
-            window.cursor_options.grab_mode = CursorGrabMode::Locked;
-            window.cursor_options.visible = false;
-            controller_query.iter_mut().for_each(|mut c| c.enable_input = true);
-        } else if key.just_pressed(KeyCode::Escape) {
-            window.cursor_options.grab_mode = CursorGrabMode::None;
-            window.cursor_options.visible = true;
-            controller_query.iter_mut().for_each(|mut c| c.enable_input = false);
-        }
+    let Ok(mut window) = window_query.get_single_mut() else { return };
+
+    if btn.just_pressed(MouseButton::Left) {
+        // Lock cursor for gameplay
+        window.cursor_options.grab_mode = CursorGrabMode::Locked;
+        window.cursor_options.visible = false;
+        controller_query.iter_mut().for_each(|mut c| c.enable_input = true);
+    } else if key.just_pressed(KeyCode::Escape) {
+        // Release cursor when ESC pressed
+        window.cursor_options.grab_mode = CursorGrabMode::None;
+        window.cursor_options.visible = true;
+        controller_query.iter_mut().for_each(|mut c| c.enable_input = false);
     }
 }
 
+// Spray pattern for weapon recoil
 const SPRAY_DIRECTIONS: [Vec3; 12] = [
-    Vec3::new(0.0, 0.0, 0.0), Vec3::new(-0.01, 0.025, 0.0), Vec3::new(-0.02, 0.05, 0.0),
-    Vec3::new(-0.03, 0.055, 0.0), Vec3::new(-0.032, 0.065, 0.0), Vec3::new(-0.034, 0.075, 0.0),
-    Vec3::new(-0.038, 0.08, 0.0), Vec3::new(-0.042, 0.082, 0.0), Vec3::new(-0.046, 0.085, 0.0),
-    Vec3::new(-0.042, 0.087, 0.0), Vec3::new(-0.039, 0.090, 0.0), Vec3::new(-0.038, 0.093, 0.0),
+    Vec3::ZERO, Vec3::new(-0.01, 0.025, 0.0), Vec3::new(-0.02, 0.05, 0.0), Vec3::new(-0.03, 0.055, 0.0),
+    Vec3::new(-0.032, 0.065, 0.0), Vec3::new(-0.034, 0.075, 0.0), Vec3::new(-0.038, 0.08, 0.0),
+    Vec3::new(-0.042, 0.082, 0.0), Vec3::new(-0.046, 0.085, 0.0), Vec3::new(-0.042, 0.087, 0.0),
+    Vec3::new(-0.039, 0.090, 0.0), Vec3::new(-0.038, 0.093, 0.0),
 ];
 
 fn click_targets(
@@ -170,39 +242,34 @@ fn click_targets(
     mut shoot_stopwatch: Query<&mut ShootTracker>,
     time: Res<Time>,
 ) {
+    // Get player and update shoot tracker
     let player_handle = player_query.single();
     let mut shoot_tracker = shoot_stopwatch.get_mut(player_handle).expect("LogicalPlayer needs ShootTracker");
     shoot_tracker.stopwatch.tick(time.delta());
 
-    if !buttons.pressed(MouseButton::Left) {
-        shoot_tracker.spray_count = 0;
-        return;
-    }
-
-    if shoot_tracker.stopwatch.elapsed_secs() <= 0.1 {
-        return;
-    }
-
-    let camera_transform = camera.single();
-    let ray_pos = camera_transform.translation;
+    // Early returns for not shooting or cooldown
+    if !buttons.pressed(MouseButton::Left) { shoot_tracker.spray_count = 0; return; }
+    if shoot_tracker.stopwatch.elapsed_secs() <= 0.1 { return; }
 
     // Get spray direction
     let spray = if shoot_tracker.spray_count >= SPRAY_DIRECTIONS.len() {
         let mut rng = rand::rng();
-        let range = Uniform::new(-0.065f32, 0.065).unwrap();
-        Vec3::new(rng.sample(range), rng.sample(range), 0.0)
+        Vec3::new(rng.sample(Uniform::new(-0.065f32, 0.065).unwrap()),
+                 rng.sample(Uniform::new(-0.065f32, 0.065).unwrap()), 0.0)
     } else {
         SPRAY_DIRECTIONS[shoot_tracker.spray_count]
     };
     shoot_tracker.spray_count += 1;
 
-    // Calculate ray direction and setup query
+    // Cast ray
+    let camera_transform = camera.single();
+    let ray_pos = camera_transform.translation;
     let ray_dir = camera_transform.forward().as_vec3() + camera_transform.rotation * spray;
     let filter = QueryFilter::new().exclude_sensors().exclude_rigid_body(player_handle);
 
-    // Cast ray and handle hit
+    // Handle hit
     if let Some((entity, _)) = rapier_context.single().cast_ray(ray_pos, ray_dir, 100.0, true, filter) {
-        if let Ok(_) = targets.get(entity) {
+        if targets.get(entity).is_ok() {
             commands.entity(entity).despawn_recursive();
             spawn_random_target(&mut commands, &mut meshes, &mut materials);
             points.value += 1;
@@ -222,23 +289,40 @@ fn spawn_random_target(
     materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
     let mut rng = rand::rng();
-    let pos = Vec3::new(
-        rng.sample(Uniform::new(-4.0f32, 4.0).unwrap()),
-        rng.sample(Uniform::new(2.0f32, 5.0).unwrap()),
-        rng.sample(Uniform::new(1.0f32, 2.0).unwrap())
-    );
-    let size = rng.sample(Uniform::new(0.3f32, 0.8).unwrap());
 
+    // Arena dimensions and target properties
+    let arena_width = 28.0;
+    let arena_depth = 28.0;
+    let arena_height = 8.0;
+    let wall_bias = 0.7;
+    let size = 0.8;
+
+    // Get random height position (same for all walls)
+    let y = rng.sample(Uniform::new(1.0, arena_height - 2.0).unwrap());
+
+    // Choose wall and position target
+    let wall_choice = rng.random_range(0..5);
+    let pos = match wall_choice {
+        0 => Vec3::new(-arena_width/2.0 * wall_bias, y, rng.sample(Uniform::new(-arena_depth/2.0 + 2.0, arena_depth/2.0 - 2.0).unwrap())), // Left
+        1 => Vec3::new(arena_width/2.0 * wall_bias, y, rng.sample(Uniform::new(-arena_depth/2.0 + 2.0, arena_depth/2.0 - 2.0).unwrap())),  // Right
+        2 => Vec3::new(rng.sample(Uniform::new(-arena_width/2.0 + 2.0, arena_width/2.0 - 2.0).unwrap()), y, arena_depth/2.0 * wall_bias),   // Back
+        3 => Vec3::new(rng.sample(Uniform::new(-arena_width/2.0 + 2.0, arena_width/2.0 - 2.0).unwrap()), y, -arena_depth/2.0 * wall_bias),  // Front
+        _ => Vec3::new(rng.sample(Uniform::new(-arena_width/2.0 + 2.0, arena_width/2.0 - 2.0).unwrap()), y,
+                      rng.sample(Uniform::new(-arena_depth/2.0 + 2.0, arena_depth/2.0 - 2.0).unwrap())), // Random
+    };
+
+    // Create target material
+    let target_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.2, 0.2),
+        emissive: Color::srgb(0.8, 0.0, 0.0).into(),
+        perceptual_roughness: 0.1, metallic: 0.2, reflectance: 0.5,
+        ..default()
+    });
+
+    // Spawn target entity
     commands.spawn((
-        Collider::ball(size),
-        RigidBody::Fixed,
-        Transform::from_translation(pos),
-        Target,
-        Mesh3d(meshes.add(Sphere::new(size))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.0, 0.0),
-            ..Default::default()
-        })),
+        Collider::ball(size), RigidBody::Fixed, Transform::from_translation(pos), Target,
+        Mesh3d(meshes.add(Sphere::new(size))), MeshMaterial3d(target_material),
     ));
 }
 
