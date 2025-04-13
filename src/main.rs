@@ -31,11 +31,17 @@ fn main() {
         .insert_resource(AmbientLight { color: Color::WHITE, brightness: 6000.0 })
         .insert_resource(ClearColor(Color::srgb(0.83, 0.96, 0.96)))
         .insert_resource(Points::default())
-        .add_plugins((DefaultPlugins, FrameTimeDiagnosticsPlugin::default(),
-                     RapierPhysicsPlugin::<NoUserData>::default(), FpsControllerPlugin))
-        .add_systems(Startup, (setup, fps_controller_setup.in_set(FpsControllerSetup)))
-        .add_systems(Update, (respawn, manage_cursor, click_targets,
-                             update_points_display, update_fps_display))
+        .add_plugins(DefaultPlugins)
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_plugins(FpsControllerPlugin)
+        .add_systems(Startup, setup)
+        .add_systems(Startup, fps_controller_setup.in_set(FpsControllerSetup))
+        .add_systems(Update, respawn)
+        .add_systems(Update, manage_cursor)
+        .add_systems(Update, click_targets)
+        .add_systems(Update, update_fps_display)
+        .add_systems(Update, update_points_display)
         .run();
 }
 
@@ -223,18 +229,16 @@ fn spawn_random_target(
     );
     let size = rng.sample(Uniform::new(0.3f32, 0.8).unwrap());
 
-    let target_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.0, 0.0),
-        ..Default::default()
-    });
-
     commands.spawn((
         Collider::ball(size),
         RigidBody::Fixed,
         Transform::from_translation(pos),
         Target,
         Mesh3d(meshes.add(Sphere::new(size))),
-        MeshMaterial3d(target_material),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.0, 0.0),
+            ..Default::default()
+        })),
     ));
 }
 
