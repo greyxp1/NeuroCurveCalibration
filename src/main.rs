@@ -46,7 +46,8 @@ fn main() {
 }
 
 fn fps_controller_setup(mut commands: Commands) {
-    let height = 3.0;
+    // Standard player height is 1.8 meters, let's make it 2.5 meters (taller)
+    let height = 10.0; // Much taller player
     let logical_entity = commands
         .spawn((
             Collider::cylinder(height / 2.0, 0.5),
@@ -54,19 +55,19 @@ fn fps_controller_setup(mut commands: Commands) {
             Restitution { coefficient: 0.0, combine_rule: CoefficientCombineRule::Min },
             ActiveEvents::COLLISION_EVENTS, Velocity::zero(), RigidBody::Dynamic,
             Sleeping::disabled(), LockedAxes::ROTATION_LOCKED,
-            AdditionalMassProperties::Mass(1.0), GravityScale(0.0), Ccd { enabled: true },
+            AdditionalMassProperties::Mass(1.0), GravityScale(0.0), Ccd { enabled: true }, // Disable gravity
             Transform::from_translation(SPAWN_POINT), LogicalPlayer,
             FpsControllerInput { pitch: -TAU / 12.0, yaw: TAU * 5.0 / 8.0, ..default() },
             FpsController { air_acceleration: 80.0, ..default() },
         ))
-        .insert(CameraConfig { height_offset: -0.5 })
+        .insert(CameraConfig { height_offset: 4.0 }) // Place camera much higher for taller player
         .insert(ShootTracker { stopwatch: Stopwatch::new(), spray_count: 0 })
         .insert(SpatialListener::new(0.5))
         .id();
 
     commands.spawn((
         Camera3d::default(), Camera { order: 0, ..default() },
-        Projection::Perspective(PerspectiveProjection { fov: TAU / 5.0, ..default() }),
+        Projection::Perspective(PerspectiveProjection { fov: TAU / 4.5, ..default() }), // Wider FOV for taller player
         Exposure::SUNLIGHT, RenderPlayer { logical_entity },
     ));
 }
@@ -81,28 +82,39 @@ fn setup(
     // Set window title
     window.single_mut().title = String::from("Kovaak's-Inspired Aim Trainer");
 
-    // Lighting setup - consolidated
-    // Main directional light
+    // Enhanced lighting setup for massive arena
+    // Main directional light - increased height
     commands.spawn((DirectionalLight { illuminance: light_consts::lux::OVERCAST_DAY, shadows_enabled: true, ..default() },
-                   Transform::from_xyz(0.0, 20.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z)));
+                   Transform::from_xyz(0.0, 40.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z)));
 
-    // Center fill light
-    commands.spawn((PointLight { color: Color::srgb(0.9, 0.9, 1.0), intensity: 3000.0, range: 50.0, ..default() },
-                   Transform::from_xyz(0.0, 10.0, 0.0)));
+    // Primary center light - massive intensity
+    commands.spawn((PointLight { color: Color::srgb(0.9, 0.9, 1.0), intensity: 10000.0, range: 120.0, ..default() },
+                   Transform::from_xyz(0.0, 20.0, 0.0)));
 
     // Corner fill lights - using a loop to reduce code
-    let corner_positions = [(-10.0, -10.0), (10.0, -10.0), (-10.0, 10.0), (10.0, 10.0)];
+    let corner_positions = [(-45.0, -45.0), (45.0, -45.0), (-45.0, 45.0), (45.0, 45.0)];
     for (x, z) in corner_positions.iter() {
-        commands.spawn((PointLight { color: Color::srgb(0.8, 0.8, 1.0), intensity: 1000.0, range: 30.0, ..default() },
-                       Transform::from_xyz(*x, 8.0, *z)));
+        commands.spawn((PointLight { color: Color::srgb(0.8, 0.8, 1.0), intensity: 5000.0, range: 80.0, ..default() },
+                       Transform::from_xyz(*x, 20.0, *z)));
+    }
+
+    // Grid of fill lights for even illumination
+    for x in [-30.0, 0.0, 30.0].iter() {
+        for z in [-30.0, 0.0, 30.0].iter() {
+            // Skip the center (0,0) as it already has the primary light
+            if *x == 0.0 && *z == 0.0 { continue; }
+
+            commands.spawn((PointLight { color: Color::srgb(0.8, 0.8, 1.0), intensity: 3000.0, range: 60.0, ..default() },
+                           Transform::from_xyz(*x, 15.0, *z)));
+        }
     }
     commands.spawn((Camera2d, Camera { order: 2, ..default() }));
 
-    // Arena setup with materials and dimensions
-    let arena_width = 30.0;
-    let arena_depth = 30.0;
-    let arena_height = 10.0;
-    let wall_thickness = 0.5;
+    // Arena setup with materials and dimensions - massive training area
+    let arena_width = 100.0;
+    let arena_depth = 100.0;
+    let arena_height = 25.0;
+    let wall_thickness = 1.0;
 
     // Materials
     let ground_material = materials.add(StandardMaterial {
@@ -125,12 +137,12 @@ fn setup(
                    MeshMaterial3d(ground_material.clone()),
                    Transform::from_translation(Vec3::new(0.0, -0.5, 0.0))));
 
-    // Grid lines
-    let line_thickness = 0.05;
-    let line_height = 0.01;
+    // Grid lines - thicker for massive arena
+    let line_thickness = 0.2;
+    let line_height = 0.05;
 
-    // Create grid lines using loops
-    for i in (-14..=14).step_by(2) {
+    // Create grid lines using loops - larger spacing for massive room
+    for i in (-48..=48).step_by(4) {
         let x = i as f32;
         // X axis lines
         commands.spawn((Mesh3d(meshes.add(Cuboid::new(line_thickness, line_height, arena_depth))),
@@ -163,8 +175,8 @@ fn setup(
                        Transform::from_translation(Vec3::new(x, y, z))));
     }
 
-    // Spawn targets
-    for _ in 0..3 {
+    // Spawn more targets for the massive arena
+    for _ in 0..10 {
         spawn_random_target(&mut commands, &mut meshes, &mut materials);
     }
 
@@ -290,12 +302,12 @@ fn spawn_random_target(
 ) {
     let mut rng = rand::rng();
 
-    // Arena dimensions and target properties
-    let arena_width = 28.0;
-    let arena_depth = 28.0;
-    let arena_height = 8.0;
-    let wall_bias = 0.7;
-    let size = 0.8;
+    // Arena dimensions and target properties - for massive arena
+    let arena_width = 95.0; // Slightly smaller than actual arena to keep targets away from walls
+    let arena_depth = 95.0;
+    let arena_height = 23.0;
+    let wall_bias = 0.85; // Higher bias to place targets closer to walls
+    let size = 1.5; // Larger targets for better visibility in the massive room
 
     // Get random height position (same for all walls)
     let y = rng.sample(Uniform::new(1.0, arena_height - 2.0).unwrap());
@@ -311,11 +323,14 @@ fn spawn_random_target(
                       rng.sample(Uniform::new(-arena_depth/2.0 + 2.0, arena_depth/2.0 - 2.0).unwrap())), // Random
     };
 
-    // Create target material
+    // Create enhanced target material for better visibility in massive arena
     let target_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.2, 0.2),
-        emissive: Color::srgb(0.8, 0.0, 0.0).into(),
-        perceptual_roughness: 0.1, metallic: 0.2, reflectance: 0.5,
+        base_color: Color::srgb(1.0, 0.1, 0.1),
+        emissive: Color::srgb(1.0, 0.2, 0.2).into(), // Brighter glow
+        perceptual_roughness: 0.0, // Perfectly smooth
+        metallic: 0.5, // More metallic for better highlights
+        reflectance: 1.0, // Maximum reflectance
+        unlit: false, // Allow lighting to affect it
         ..default()
     });
 
