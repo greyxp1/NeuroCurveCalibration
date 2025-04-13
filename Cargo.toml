@@ -1,20 +1,14 @@
 [package]
-name = "neurocurvecalibration"
+name = "NeuroCalibration"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-# Use dynamic linking for Bevy to avoid linker errors
-bevy = { version = "0.13", features = ["dynamic_linking"] }
-rand = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0" # For outputting results as JSON
-chrono = { version = "0.4", features = ["serde"] } # If timestamps are needed
+bevy = { version = "0.15.3" }
+bevy_fps_controller = { git = "https://github.com/svdragster/bevy_fps_controller.git", branch = "main" }
+bevy_rapier3d = "0.29.0"
+rand = "0.9.0"
 
-# Optional: Enable optimizations for release builds
-[profile.release]
+# Enable max optimizations for dependencies, but not for our code:
+[profile.dev.package."*"]
 opt-level = 3
-lto = "thin"
-codegen-units = 1
